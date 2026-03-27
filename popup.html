@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Irishka Group Master by SBS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080b13;
+      --surface: #0f1421;
+      --surface2: #161d30;
+      --surface3: #1c253d;
+      --border: #222d48;
+      --accent: #3b82f6;
+      --accent2: #60a5fa;
+      --accent-dim: rgba(59,130,246,0.1);
+      --text: #dde3f0;
+      --muted: #5e6d90;
+      --success: #22c55e;
+      --success-dim: rgba(34,197,94,0.1);
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --danger-dim: rgba(239,68,68,0.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 440px; min-height: 580px;
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', sans-serif; font-size: 13px; overflow-x: hidden;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 16px; position: sticky; top: 0; z-index: 20;
+    }
+    .header-top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 0 11px;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+
+    /* Russian flag icon */
+    .logo-icon {
+      width: 34px; height: 34px; border-radius: 8px; overflow: hidden;
+      display: flex; flex-direction: column;
+      box-shadow: 0 0 14px rgba(59,99,235,0.4);
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .logo-icon .flag-white { flex: 1; background: #ffffff; }
+    .logo-icon .flag-blue  { flex: 1; background: #0033a0; }
+    .logo-icon .flag-red   { flex: 1; background: #cc0000; }
+
+    .logo-text { font-size: 14px; font-weight: 700; }
+    .logo-text .by { font-weight: 400; color: var(--muted); font-size: 11px; margin: 0 3px; }
+    .logo-text .name { color: var(--accent2); }
+
+    /* Connection pill */
+    .conn-pill {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 11px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+      border: 1px solid var(--border); background: var(--surface2);
+      color: var(--muted); transition: all 0.35s; max-width: 190px;
+    }
+    .conn-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0; transition: all 0.35s;
+    }
+    .conn-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .conn-pill.checking { color: var(--accent2); border-color: rgba(96,165,250,0.3); }
+    .conn-pill.checking .conn-dot { background: var(--accent2); animation: spin 0.9s linear infinite; border-radius: 2px; }
+
+    .conn-pill.online { border-color: rgba(34,197,94,0.4); background: var(--success-dim); color: var(--success); }
+    .conn-pill.online .conn-dot { background: var(--success); box-shadow: 0 0 7px var(--success); animation: blink 2.2s ease-in-out infinite; }
+
+    .conn-pill.offline { border-color: rgba(239,68,68,0.35); background: var(--danger-dim); color: var(--danger); }
+    .conn-pill.offline .conn-dot { background: var(--danger); }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    @keyframes spin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+    /* Running bar */
+    .run-bar {
+      display: none; align-items: center; gap: 8px;
+      padding: 5px 0 8px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--warning);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .run-bar.show { display: flex; }
+    .run-bar-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1s infinite; flex-shrink: 0; }
+
+    /* ── TABS ── */
+    .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .tab {
+      flex: 1; padding: 10px 4px; text-align: center; cursor: pointer;
+      font-size: 10.5px; font-weight: 600; color: var(--muted);
+      border-bottom: 2px solid transparent; transition: all 0.2s;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; padding: 15px; }
+    .tab-panel.active { display: block; }
+
+    /* ── FORM BASE ── */
+    label {
+      display: block; font-size: 10.5px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .field { margin-bottom: 14px; }
+
+    /* ── EDITOR ── */
+    .toolbar {
+      display: flex; gap: 3px; flex-wrap: wrap;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-bottom: none; border-radius: 8px 8px 0 0; padding: 5px 8px;
+    }
+    .toolbar button {
+      width: 28px; height: 28px; background: transparent;
+      border: 1px solid transparent; border-radius: 5px;
+      color: var(--text); cursor: pointer; font-size: 13px;
+      display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+    }
+    .toolbar button:hover { background: var(--surface3); border-color: var(--border); }
+    .toolbar .sep { width: 1px; background: var(--border); margin: 3px 4px; align-self: stretch; }
+
+    #editor {
+      min-height: 115px; max-height: 170px; overflow-y: auto;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 0 0 8px 8px; padding: 10px 12px;
+      font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.65;
+      color: var(--text); outline: none; transition: border-color 0.2s;
+    }
+    #editor:focus { border-color: var(--accent); }
+    #editor[data-placeholder]:empty:before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; }
+
+    .char-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); text-align: right; margin-top: 4px; }
+    .char-count.warn { color: var(--warning); }
+    .char-count.over { color: var(--danger); }
+
+    /* Emoji */
+    .emoji-bar { display: flex; gap: 4px; flex-wrap: wrap; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 7px; }
+    .emoji-btn { font-size: 18px; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: background 0.15s; border: none; background: none; }
+    .emoji-btn:hover { background: var(--surface3); }
+
+    /* Image upload */
+    .img-upload-area { border: 2px dashed var(--border); border-radius: 8px; padding: 14px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface2); }
+    .img-upload-area:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .img-upload-area p { color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .img-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .img-thumb { position: relative; width: 68px; height: 68px; }
+    .img-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+    .img-thumb .remove-img { position: absolute; top: -5px; right: -5px; width: 17px; height: 17px; background: var(--danger); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 9px; color: white; border: none; }
+
+    /* ── GROUPS TAB ── */
+
+    /* Not connected card */
+    .no-fb-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 22px 18px; text-align: center; margin-bottom: 14px;
+    }
+    .no-fb-card .nf-icon { font-size: 38px; margin-bottom: 10px; }
+    .no-fb-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 7px; }
+    .no-fb-card p { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 16px; }
+    .btn-open-fb {
+      width: 100%; padding: 11px; border-radius: 9px;
+      background: #1877f2; color: white;
+      font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700;
+      border: none; cursor: pointer; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-open-fb:hover { background: #1462cc; transform: translateY(-1px); }
+
+    /* Connected card */
+    .fb-user-card {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--success-dim); border: 1px solid rgba(34,197,94,0.3);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;
+    }
+    .fb-user-avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: linear-gradient(135deg, #0033a0, #3b82f6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0;
+    }
+    .fb-user-info { flex: 1; min-width: 0; }
+    .fb-user-name { font-size: 13px; font-weight: 700; color: var(--success); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fb-user-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* Scan button */
+    .btn-scan-big {
+      width: 100%; padding: 12px 16px; border-radius: 10px;
+      background: linear-gradient(135deg, #1e3a8a, #2563eb);
+      border: 1px solid rgba(59,130,246,0.4);
+      color: white; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 9px;
+    }
+    .btn-scan-big:hover:not(:disabled) { background: linear-gradient(135deg, #2563eb, #3b82f6); transform: translateY(-1px); }
+    .btn-scan-big:disabled { opacity: 0.42; cursor: not-allowed; transform: none; }
+
+    .scan-log { margin-top: 9px; min-height: 18px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+    .scan-log.ok  { color: var(--success); }
+    .scan-log.err { color: var(--danger); }
+    .scan-log.inf { color: var(--accent2); }
+
+    /* Groups list */
+    .groups-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .groups-list { display: flex; flex-direction: column; gap: 5px; max-height: 190px; overflow-y: auto; }
+    .group-item { display: flex; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; transition: border-color 0.2s; }
+    .group-item:hover { border-color: var(--accent); }
+    .group-item input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+    .group-info { flex: 1; min-width: 0; }
+    .group-name { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .group-url-txt { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 3px; border-radius: 4px; transition: all 0.15s; }
+    .icon-btn:hover { color: var(--danger); background: var(--danger-dim); }
+
+    .add-row { display: flex; gap: 8px; margin-top: 10px; }
+    .add-row input { flex: 1; }
+    .divider { height: 1px; background: var(--border); margin: 12px 0; }
+    .empty-note { color: var(--muted); font-size: 12px; text-align: center; padding: 18px 10px; line-height: 1.6; }
+
+    /* Inputs */
+    input[type="text"], input[type="url"] {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 12px; color: var(--text);
+      font-family: 'Inter', sans-serif; font-size: 13px; outline: none; transition: border-color 0.2s;
+    }
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+
+    /* ── TIMER ── */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+    .toggle-row span { font-size: 13px; }
+    .toggle { position: relative; width: 38px; height: 20px; }
+    .toggle input { display: none; }
+    .toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 20px; cursor: pointer; transition: background 0.2s; }
+    .toggle-slider:before { content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; background: var(--muted); border-radius: 50%; transition: all 0.2s; }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(18px); background: white; }
+
+    .timer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+    .timer-unit { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+    .timer-unit .num { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; color: var(--accent2); line-height: 1; }
+    .timer-unit .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-top: 4px; letter-spacing: 0.8px; }
+    .range-row { display: flex; align-items: center; gap: 10px; }
+    input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+    .range-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent2); min-width: 38px; text-align: right; }
+
+    /* ── BUTTONS ── */
+    .btn { padding: 10px 16px; border-radius: 8px; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent2); transform: translateY(-1px); }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent2); }
+    .btn-danger { background: var(--danger-dim); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.18); }
+    .btn-sm { padding: 6px 11px; font-size: 11px; }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; transform: none !important; }
+
+    /* ── PROGRESS ── */
+    .progress-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
+    .progress-bar-bg { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 3px; transition: width 0.4s ease; }
+    .progress-steps { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; max-height: 145px; overflow-y: auto; }
+    .step-item { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px; border-radius: 6px; background: var(--surface2); }
+    .step-item.done    { color: var(--success); }
+    .step-item.pending { color: var(--muted); }
+    .step-item.error   { color: var(--danger); }
+    .step-item.current { color: var(--warning); animation: pulse 1s infinite; }
+
+    .countdown-box { text-align: center; padding: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; }
+    .countdown-box .big-num { font-family: 'JetBrains Mono', monospace; font-size: 40px; color: var(--accent2); font-weight: 600; }
+    .countdown-box .cd-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin: 2px 0; }
+
+    /* ── FOOTER ── */
+    .footer { padding: 11px 15px; border-top: 1px solid var(--border); background: var(--surface); display: flex; gap: 8px; }
+    .footer .btn { flex: 1; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* Unit selector */
+    .unit-selector {
+      display: flex; gap: 0;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden;
+    }
+    .unit-btn {
+      flex: 1; padding: 8px 12px;
+      background: transparent; border: none;
+      color: var(--muted); font-family: 'Inter', sans-serif;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .unit-btn:first-child { border-right: 1px solid var(--border); }
+    .unit-btn.active { background: var(--accent); color: white; }
+    .unit-btn:hover:not(.active) { background: var(--surface3); color: var(--text); }
+
+    /* ── SPINTAX ── */
+    .spintax-bar {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 10px; margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .spintax-bar .sp-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.7px; color: var(--muted); margin-right: 2px;
+    }
+    .sp-btn {
+      padding: 4px 9px; border-radius: 5px; font-size: 11px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface3); color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .sp-btn:hover { border-color: var(--accent); color: var(--accent2); }
+    .sp-btn.sp-highlight { background: rgba(59,130,246,0.15); border-color: var(--accent); color: var(--accent2); }
+
+    .spintax-preview-wrap {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden; margin-bottom: 10px;
+    }
+    .spintax-preview-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 11px; border-bottom: 1px solid var(--border);
+      background: var(--surface3);
+    }
+    .spintax-preview-header span {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.7px; color: var(--muted);
+    }
+    .spintax-preview-body {
+      padding: 10px 12px; font-size: 12.5px; line-height: 1.65;
+      color: var(--text); min-height: 44px; white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .spintax-preview-body .sp-chosen {
+      color: var(--accent2); font-weight: 600;
+      background: rgba(59,130,246,0.12); border-radius: 3px; padding: 0 2px;
+    }
+    .sp-hint {
+      font-size: 10.5px; color: var(--muted); line-height: 1.5;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; padding: 7px 10px; margin-bottom: 10px;
+    }
+    .sp-hint code {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      background: var(--surface3); padding: 1px 5px; border-radius: 3px;
+      color: var(--accent2);
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <div class="logo">
+      <!-- Russian flag icon -->
+      <div class="logo-icon">
+        <div class="flag-white"></div>
+        <div class="flag-blue"></div>
+        <div class="flag-red"></div>
+      </div>
+      <div class="logo-text">Fartmily <span class="by">by</span><span class="name">Irishka</span></div>
+    </div>
+    <div class="conn-pill checking" id="connPill">
+      <div class="conn-dot"></div>
+      <span class="conn-name" id="connName">Verificando...</span>
+    </div>
+  </div>
+  <div class="run-bar" id="runBar">
+    <div class="run-bar-dot"></div>
+    <span id="runBarText">Publicando...</span>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" data-tab="compose">✍️ Mensaje</div>
+  <div class="tab" data-tab="groups">👥 Grupos</div>
+  <div class="tab" data-tab="timer">⏱️ Timer</div>
+  <div class="tab" data-tab="progress">📊 Estado</div>
+</div>
+
+<!-- ═══ COMPOSE ═══ -->
+<div class="tab-panel active" id="tab-compose">
+  <div class="field">
+    <label>Mensaje</label>
+    <div class="toolbar">
+      <button id="tb-bold" title="Negrita"><b>B</b></button>
+      <button id="tb-italic" title="Cursiva"><i>I</i></button>
+      <button id="tb-underline" title="Subrayado"><u>U</u></button>
+      <div class="sep"></div>
+      <button id="tb-ul" title="Lista">≡</button>
+      <button id="tb-ol" title="Lista numerada">1.</button>
+      <div class="sep"></div>
+      <button id="tb-center" title="Centrar">▬</button>
+      <div class="sep"></div>
+      <button id="tb-link" title="Link">🔗</button>
+      <button id="tb-clear" title="Limpiar">✕</button>
+    </div>
+    <div id="editor" contenteditable="true" data-placeholder="Escribe tu mensaje aquí..."></div>
+    <div class="char-count" id="charCount">0 caracteres</div>
+  </div>
+  <!-- Spintax toolbar -->
+  <div class="spintax-bar">
+    <span class="sp-label">Spintax</span>
+    <button class="sp-btn" id="spInsert">{opción1|opción2|opción3}</button>
+    <button class="sp-btn" id="spPreview">👁 Vista previa</button>
+    <button class="sp-btn" id="spRespin">🔀 Nuevo spin</button>
+  </div>
+
+  <!-- Spintax preview (hidden by default) -->
+  <div class="spintax-preview-wrap" id="spintaxPreviewWrap" style="display:none">
+    <div class="spintax-preview-header">
+      <span>Vista previa del mensaje</span>
+      <span id="spVariantLabel" style="color:var(--accent2);font-size:10px;font-family:'JetBrains Mono',monospace"></span>
+    </div>
+    <div class="spintax-preview-body" id="spintaxPreviewBody"></div>
+  </div>
+
+  <div class="sp-hint" id="spHint">
+    💡 Usa Spintax para variar el mensaje en cada grupo:<br>
+    <code>{Hola|Hey|Buenas}</code> → elige una opción al azar por grupo.<br>
+    Puedes anidar: <code>{texto {A|B}|texto C}</code>
+  </div>
+
+  <div class="field">
+    <label>Emojis rápidos</label>
+    <div class="emoji-bar">
+      <button class="emoji-btn" data-emoji="🔥">🔥</button>
+      <button class="emoji-btn" data-emoji="✅">✅</button>
+      <button class="emoji-btn" data-emoji="👋">👋</button>
+      <button class="emoji-btn" data-emoji="💡">💡</button>
+      <button class="emoji-btn" data-emoji="🎯">🎯</button>
+      <button class="emoji-btn" data-emoji="🚀">🚀</button>
+      <button class="emoji-btn" data-emoji="❤️">❤️</button>
+      <button class="emoji-btn" data-emoji="👍">👍</button>
+      <button class="emoji-btn" data-emoji="💬">💬</button>
+      <button class="emoji-btn" data-emoji="📢">📢</button>
+      <button class="emoji-btn" data-emoji="⚡">⚡</button>
+      <button class="emoji-btn" data-emoji="🎁">🎁</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Imágenes (máx. 5)</label>
+    <div class="img-upload-area" id="imgUploadArea">
+      <div style="font-size:22px">📷</div>
+      <p>Clic para agregar imágenes</p>
+    </div>
+    <input type="file" id="imgInput" accept="image/*" multiple style="display:none">
+    <div class="img-preview" id="imgPreview"></div>
+  </div>
+</div>
+
+<!-- ═══ GROUPS ═══ -->
+<div class="tab-panel" id="tab-groups">
+
+  <!-- NOT CONNECTED -->
+  <div id="stateOff">
+    <div class="no-fb-card">
+      <div class="nf-icon">🔌</div>
+      <h3>Facebook no detectado</h3>
+      <p>Para escanear tus grupos necesitas tener Facebook abierto en Chrome y estar logueado con tu cuenta.</p>
+      <button class="btn-open-fb" id="btnOpenFb">
+        <span style="font-size:17px;font-weight:900;font-family:serif">f</span> Abrir Facebook ahora
+      </button>
+    </div>
+  </div>
+
+  <!-- CONNECTED -->
+  <div id="stateOn" style="display:none">
+    <div class="fb-user-card">
+      <div class="fb-user-avatar">👤</div>
+      <div class="fb-user-info">
+        <div class="fb-user-name" id="fbUserName">—</div>
+        <div class="fb-user-sub" id="fbUserSub">✅ Conectado a Facebook</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Escanear grupos automáticamente</label>
+      <button class="btn-scan-big" id="btnScan">
+        <span id="scanIcon">🔍</span>
+        <span id="scanTxt">Leer mis grupos desde Facebook</span>
+      </button>
+      <div class="scan-log" id="scanLog"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="groups-bar">
+      <label style="margin:0">Grupos (<span id="groupCount">0</span>)</label>
+      <div style="display:flex;gap:5px">
+        <button class="btn btn-secondary btn-sm" id="btnSelectAll">Todos</button>
+        <button class="btn btn-secondary btn-sm" id="btnDeselectAll">Ninguno</button>
+        <button class="btn btn-danger btn-sm" id="btnClearAll">🗑</button>
+      </div>
+    </div>
+    <div class="groups-list" id="groupsList">
+      <div class="empty-note">Sin grupos todavía.<br>Usa el escáner o agrega manualmente abajo.</div>
+    </div>
+    <div class="add-row">
+      <input type="url" id="groupUrl" placeholder="https://www.facebook.com/groups/..."/>
+      <button class="btn btn-secondary btn-sm" id="btnAddGroup">+ Agregar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TIMER ═══ -->
+<div class="tab-panel" id="tab-timer">
+  <div class="toggle-row">
+    <span>⏱️ Timer entre posts</span>
+    <label class="toggle">
+      <input type="checkbox" id="timerEnabled" checked>
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+  <div id="timerOpts">
+    <div class="field">
+      <label>Unidad de tiempo</label>
+      <div class="unit-selector">
+        <button class="unit-btn" id="unitSec">Segundos</button>
+        <button class="unit-btn active" id="unitMin">Minutos</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Espera entre grupos</label>
+      <div class="range-row">
+        <input type="range" id="timerSec" min="1" max="60" value="5">
+        <span class="range-val" id="timerSecVal">5 min</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Variación aleatoria (±)</label>
+      <div class="range-row">
+        <input type="range" id="timerVar" min="0" max="30" value="2">
+        <span class="range-val" id="timerVarVal">±2 min</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">Variación para parecer más humano y evitar bloqueos.</div>
+    </div>
+    <div class="field">
+      <label>Rango estimado</label>
+      <div class="timer-grid">
+        <div class="timer-unit"><div class="num" id="tMin">3</div><div class="lbl" id="tMinLbl">min mínimo</div></div>
+        <div class="timer-unit"><div class="num" id="tMax">7</div><div class="lbl" id="tMaxLbl">min máximo</div></div>
+      </div>
+    </div>
+    <div class="toggle-row">
+      <span>🔔 Notificar al terminar</span>
+      <label class="toggle">
+        <input type="checkbox" id="notifyEnd" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PROGRESS ═══ -->
+<div class="tab-panel" id="tab-progress">
+  <div class="progress-wrap">
+    <div class="progress-header">
+      <span id="progLabel">Sin iniciar</span>
+      <span id="progFrac" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">0/0</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progBar" style="width:0%"></div>
+    </div>
+    <div class="progress-steps" id="progSteps">
+      <div class="empty-note">Inicia el proceso para ver el estado.</div>
+    </div>
+  </div>
+  <div class="countdown-box" id="cdBox" style="display:none">
+    <div class="cd-lbl">Próximo post en</div>
+    <div class="big-num" id="cdNum">--</div>
+    <div class="cd-lbl">segundos</div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <button class="btn btn-secondary" id="btnReset">🗑️ Reset</button>
+  <button class="btn btn-primary" id="btnStart">🚀 Iniciar posts</button>
+  <button class="btn btn-danger" id="btnStop" style="display:none">⏹ Detener</button>
+</div>
+
+<script src="src/popup.js"></script>
+</body>
+</html>

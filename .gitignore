@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.example
+node_modules/
+license-server/node_modules/
+license-server/licenses.json
