@@ -235,6 +235,41 @@ async function handleValidate(req, res) {
   }
 }
 
+/** Move license to this device only (replaces previous device bindings). Requires valid license key. */
+async function handleTransferDevice(req, res) {
+  try {
+    const body = await collectJson(req);
+    const key = String(body.licenseKey || '').trim().toUpperCase();
+    const deviceId = safeDeviceId(body.deviceId || '');
+    if (!key) return json(res, 400, { ok: false, message: 'Missing license key' });
+    if (!deviceId) return json(res, 400, { ok: false, message: 'Missing or invalid deviceId' });
+    const lic = licenses.get(key);
+    if (!lic) return json(res, 200, { ok: false, message: 'License not found' });
+    if (!lic.active) return json(res, 200, { ok: false, message: 'License inactive' });
+    const maxDevices = Math.max(1, Number(lic.maxDevices || MAX_DEVICES_PER_LICENSE));
+    const next = {
+      ...lic,
+      maxDevices,
+      devices: [deviceId],
+      transferredAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    licenses.set(key, next);
+    saveStore();
+    return json(res, 200, {
+      ok: true,
+      valid: true,
+      plan: next.plan || 'PRO',
+      email: next.email,
+      allowedDevices: maxDevices,
+      usedDevices: 1
+    });
+  } catch (e) {
+    return json(res, 500, { ok: false, message: e.message || 'Transfer error' });
+  }
+}
+
 async function handleStripeWebhook(req, res) {
   if (!stripe || !STRIPE_WEBHOOK_SECRET) {
     return json(res, 500, { ok: false, message: 'Stripe not configured' });
@@ -309,6 +344,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
   if (req.method === 'GET' && req.url === '/health') return json(res, 200, { ok: true });
   if (req.method === 'POST' && req.url === '/api/license/validate') return handleValidate(req, res);
+  if (req.method === 'POST' && req.url === '/api/license/transfer-device') return handleTransferDevice(req, res);
   if (req.method === 'POST' && req.url === '/api/stripe/webhook') return handleStripeWebhook(req, res);
   if (req.method === 'POST' && req.url === '/api/license/create-demo') return handleCreateDemoLicense(req, res);
   if (req.method === 'POST' && req.url === '/api/license/reset-device') return handleAdminResetDevice(req, res);
