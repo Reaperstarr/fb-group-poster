@@ -1,0 +1,19 @@
+{
+  "name": "manatal-cv-mirror",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HTTPS endpoint: recibe CV desde la extensión Manatal y lo sube a OneDrive vía Microsoft Graph (client credentials).",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --env-file=.env server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^2.0.0"
+  }
+}
