@@ -4,6 +4,7 @@
  */
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -65,6 +66,98 @@ function storageMode() {
   return cs && String(cs).trim() ? 'blob' : 'onedrive';
 }
 
+function sitePublicBase() {
+  return String(process.env.SITE_PUBLIC_BASE || '')
+    .trim()
+    .replace(/\/+$/, '');
+}
+
+/** Secreto para firmar ?exp=&sig= en enlaces /c/:id (reclutadores no ven URL de Blob ni “manatal”). */
+function cvLinkSigningSecret() {
+  return String(process.env.CV_LINK_SECRET || process.env.MIRROR_API_KEY || '').trim();
+}
+
+function cvLinkExpiryUnixSec() {
+  const days = Math.min(
+    365 * 10,
+    Math.max(1, parseInt(process.env.BLOB_SAS_EXPIRY_DAYS || '365', 10) || 365)
+  );
+  return Math.floor(Date.now() / 1000) + days * 86400;
+}
+
+function signCvAccess(manatalId, expUnix) {
+  const secret = cvLinkSigningSecret();
+  return crypto.createHmac('sha256', secret).update(`${manatalId}:${expUnix}`).digest('hex');
+}
+
+function verifyCvAccess(manatalId, expUnix, sigHex) {
+  const secret = cvLinkSigningSecret();
+  if (!secret || !/^\d+$/.test(String(manatalId))) return false;
+  if (Number(expUnix) < Math.floor(Date.now() / 1000)) return false;
+  if (!sigHex || typeof sigHex !== 'string' || !/^[a-f0-9]{64}$/i.test(sigHex)) return false;
+  const expected = signCvAccess(manatalId, expUnix);
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expected, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+function blobContainerName() {
+  return (process.env.AZURE_STORAGE_CONTAINER || 'manatal-cv').replace(/^\/+|\/+$/g, '') || 'manatal-cv';
+}
+
+function cvUploadFolder() {
+  return (process.env.CV_UPLOAD_FOLDER || 'CV').replace(/^\/+|\/+$/g, '') || 'CV';
+}
+
+function getBlobContainerClient() {
+  const cs = requireEnv('AZURE_STORAGE_CONNECTION_STRING');
+  const blobServiceClient = BlobServiceClient.fromConnectionString(cs);
+  return blobServiceClient.getContainerClient(blobContainerName());
+}
+
+/**
+ * Localiza el PDF en el contenedor por manatalId (nombre actual o legado).
+ */
+async function findBlobPathForManatalId(containerClient, manatalId) {
+  const id = String(manatalId || '').trim();
+  if (!/^\d+$/.test(id)) return null;
+
+  const folder = cvUploadFolder();
+  const prefixes = [`${folder}/`, 'CV/', 'ManatalCV/'];
+  const exactNames = [`cv-${id}.pdf`, `manatal-${id}-cv.pdf`];
+
+  for (const pref of prefixes) {
+    for (const name of exactNames) {
+      const path = pref + name;
+      if (await containerClient.getBlockBlobClient(path).exists()) return path;
+    }
+  }
+
+  for (const pref of prefixes) {
+    for await (const b of containerClient.listBlobsFlat({ prefix: pref })) {
+      if (b.name.endsWith(`-${id}.pdf`)) return b.name;
+    }
+  }
+
+  return null;
+}
+
+function buildProxyPublicCvUrl(manatalId, expUnix) {
+  const base = sitePublicBase();
+  const sig = signCvAccess(manatalId, expUnix);
+  return `${base}/c/${encodeURIComponent(manatalId)}?exp=${expUnix}&sig=${encodeURIComponent(sig)}`;
+}
+
+function useProxyPublicCvUrls() {
+  return (
+    storageMode() === 'blob' &&
+    Boolean(sitePublicBase()) &&
+    Boolean(cvLinkSigningSecret())
+  );
+}
+
 async function uploadToAzureBlob(buf, itemPath) {
   const cs = requireEnv('AZURE_STORAGE_CONNECTION_STRING');
   const containerName =
@@ -80,8 +173,12 @@ async function uploadToAzureBlob(buf, itemPath) {
   await containerClient.createIfNotExists();
 
   const blockBlobClient = containerClient.getBlockBlobClient(itemPath);
+  const downloadName = String(itemPath.split('/').pop() || 'cv.pdf').replace(/"/g, '');
   await blockBlobClient.uploadData(buf, {
-    blobHTTPHeaders: { blobContentType: 'application/pdf' }
+    blobHTTPHeaders: {
+      blobContentType: 'application/pdf',
+      blobContentDisposition: `inline; filename="${downloadName}"`
+    }
   });
 
   const cred = new StorageSharedKeyCredential(accountName, accountKey);
@@ -164,12 +261,87 @@ function checkApiKey(req, res, next) {
   next();
 }
 
+/** Nombre de archivo en blob/drive: {slug|cv}-{manatalId}.pdf (sin "manatal" en el nombre). */
+function mirrorSafePdfFilename(manatalId, fileBaseRaw) {
+  const safeId = String(manatalId || '').trim();
+  let p = String(fileBaseRaw || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 72);
+  if (!p) p = 'cv';
+  return `${p}-${safeId}.pdf`;
+}
+
 app.get('/', (_req, res) => {
   res.type('text/plain').send('Manatal CV mirror OK. POST /upload with multipart: file (PDF), manatalId.');
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'manatal-cv-mirror', storage: storageMode() });
+  res.json({
+    ok: true,
+    service: 'manatal-cv-mirror',
+    storage: storageMode(),
+    publicCvProxy: useProxyPublicCvUrls()
+  });
+});
+
+/** PDF para reclutadores: URL sin cuenta Azure ni “manatal” en el dominio/ruta del blob. */
+app.options('/c/:manatalId', (_req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
+app.get('/c/:manatalId', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const manatalId = String(req.params.manatalId || '').trim();
+  const exp = req.query.exp;
+  const sig = req.query.sig;
+
+  if (!verifyCvAccess(manatalId, exp, sig)) {
+    return res.status(403).type('text/plain').send('Enlace inválido o expirado.');
+  }
+
+  if (storageMode() !== 'blob') {
+    return res.status(501).type('text/plain').send('Solo disponible con Azure Blob.');
+  }
+
+  try {
+    const containerClient = getBlobContainerClient();
+    const blobPath = await findBlobPathForManatalId(containerClient, manatalId);
+    if (!blobPath) {
+      return res.status(404).type('text/plain').send('CV no encontrado.');
+    }
+
+    const blobClient = containerClient.getBlockBlobClient(blobPath);
+    const download = await blobClient.download();
+    const filename = String(blobPath.split('/').pop() || 'cv.pdf').replace(/"/g, '');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+
+    const stream = download.readableStreamBody;
+    if (!stream) {
+      return res.status(500).type('text/plain').send('Sin cuerpo de respuesta.');
+    }
+    stream.on('error', (err) => {
+      console.error('[cv-proxy] stream', err);
+      if (!res.headersSent) res.status(500).end();
+    });
+    stream.pipe(res);
+  } catch (e) {
+    console.error('[cv-proxy]', e);
+    if (!res.headersSent) {
+      res.status(500).type('text/plain').send('Error al leer el CV.');
+    }
+  }
 });
 
 app.post('/upload', checkApiKey, upload.single('file'), async (req, res) => {
@@ -188,20 +360,34 @@ app.post('/upload', checkApiKey, upload.single('file'), async (req, res) => {
     if (buf.length > MAX_BYTES) {
       return res.status(413).json({ error: 'PDF demasiado grande' });
     }
+    // Evita guardar HTML/JSON de error como "PDF" (Chrome muestra "Failed to load PDF document").
+    const pdfHead = buf.subarray(0, Math.min(1024, buf.length)).toString('latin1');
+    if (!pdfHead.includes('%PDF')) {
+      return res.status(400).json({
+        error: 'El cuerpo no es un PDF válido (falta cabecera %PDF). Suele pasar si Manatal devolvió HTML o un error en lugar del archivo.'
+      });
+    }
 
-    const folder = (process.env.CV_UPLOAD_FOLDER || 'ManatalCV').replace(/^\/+|\/+$/g, '') || 'ManatalCV';
-    const safeFile = `manatal-${manatalId}-cv.pdf`;
+    const folder = (process.env.CV_UPLOAD_FOLDER || 'CV').replace(/^\/+|\/+$/g, '') || 'CV';
+    const fileBaseHint =
+      req.body && req.body.fileBase != null ? String(req.body.fileBase).trim() : '';
+    const safeFile = mirrorSafePdfFilename(manatalId, fileBaseHint);
     const itemPath = `${folder}/${safeFile}`;
 
     if (storageMode() === 'blob') {
-      const { publicUrl } = await uploadToAzureBlob(buf, itemPath);
+      const { publicUrl: sasOrBlobUrl } = await uploadToAzureBlob(buf, itemPath);
+      const expUnix = cvLinkExpiryUnixSec();
+      const publicUrl = useProxyPublicCvUrls()
+        ? buildProxyPublicCvUrl(manatalId, expUnix)
+        : sasOrBlobUrl;
       return res.status(200).json({
         publicUrl,
         url: publicUrl,
         webViewLink: publicUrl,
         manatalId,
         path: itemPath,
-        storage: 'blob'
+        storage: 'blob',
+        cvLinkExpiresAt: useProxyPublicCvUrls() ? expUnix : undefined
       });
     }
 

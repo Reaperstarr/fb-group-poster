@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --env-file=.env server.js"
+    "dev": "node --env-file=.env server.js",
+    "migrate-blobs": "node scripts/migrate-rename-blobs.js",
+    "migrate-blobs:dry": "node scripts/migrate-rename-blobs.js --dry-run"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
