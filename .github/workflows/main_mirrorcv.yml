@@ -1,5 +1,5 @@
-# Despliega solo manatal-cv-mirror/ al App Service mirrorcv (monorepo fb-group-poster).
-# Los secrets AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID los configura Azure al conectar GitHub (OIDC).
+# Despliega solo manatal-cv-mirror/ → Azure App Service mirrorcv.
+# Secreto en GitHub: AZURE_WEBAPP_PUBLISH_PROFILE (XML completo del “perfil de publicación” de Azure).
 
 name: Build and deploy Node.js app to Azure Web App - mirrorcv
 
@@ -13,7 +13,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -33,16 +32,9 @@ jobs:
         working-directory: manatal-cv-mirror
         run: npm ci
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: mirrorcv
-          slot-name: Production
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: manatal-cv-mirror
