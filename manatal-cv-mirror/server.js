@@ -7,6 +7,13 @@
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
+const {
+  BlobServiceClient,
+  StorageSharedKeyCredential,
+  generateBlobSASQueryParameters,
+  BlobSASPermissions,
+  SASProtocol
+} = require('@azure/storage-blob');
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const upload = multer({
@@ -33,6 +40,67 @@ function requireEnv(name) {
     throw new Error(`Missing env ${name}`);
   }
   return String(v).trim();
+}
+
+function parseStorageConnectionString(cs) {
+  const parts = {};
+  String(cs)
+    .split(';')
+    .filter(Boolean)
+    .forEach((part) => {
+      const eq = part.indexOf('=');
+      if (eq === -1) return;
+      parts[part.slice(0, eq).trim().toLowerCase()] = part.slice(eq + 1).trim();
+    });
+  const accountName = parts.accountname;
+  const accountKey = parts.accountkey;
+  if (!accountName || !accountKey) {
+    throw new Error('AZURE_STORAGE_CONNECTION_STRING inválida (falta AccountName o AccountKey)');
+  }
+  return { accountName, accountKey };
+}
+
+function storageMode() {
+  const cs = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  return cs && String(cs).trim() ? 'blob' : 'onedrive';
+}
+
+async function uploadToAzureBlob(buf, itemPath) {
+  const cs = requireEnv('AZURE_STORAGE_CONNECTION_STRING');
+  const containerName =
+    (process.env.AZURE_STORAGE_CONTAINER || 'manatal-cv').replace(/^\/+|\/+$/g, '') || 'manatal-cv';
+  const expiryDays = Math.min(
+    365 * 10,
+    Math.max(1, parseInt(process.env.BLOB_SAS_EXPIRY_DAYS || '365', 10) || 365)
+  );
+
+  const { accountName, accountKey } = parseStorageConnectionString(cs);
+  const blobServiceClient = BlobServiceClient.fromConnectionString(cs);
+  const containerClient = blobServiceClient.getContainerClient(containerName);
+  await containerClient.createIfNotExists();
+
+  const blockBlobClient = containerClient.getBlockBlobClient(itemPath);
+  await blockBlobClient.uploadData(buf, {
+    blobHTTPHeaders: { blobContentType: 'application/pdf' }
+  });
+
+  const cred = new StorageSharedKeyCredential(accountName, accountKey);
+  const startsOn = new Date(Date.now() - 5 * 60 * 1000);
+  const expiresOn = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
+  const sas = generateBlobSASQueryParameters(
+    {
+      containerName,
+      blobName: itemPath,
+      permissions: BlobSASPermissions.parse('r'),
+      startsOn,
+      expiresOn,
+      protocol: SASProtocol.Https
+    },
+    cred
+  ).toString();
+
+  const publicUrl = `${blockBlobClient.url}?${sas}`;
+  return { publicUrl, itemPath, containerName };
 }
 
 async function getGraphAccessToken() {
@@ -101,7 +169,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'manatal-cv-mirror' });
+  res.json({ ok: true, service: 'manatal-cv-mirror', storage: storageMode() });
 });
 
 app.post('/upload', checkApiKey, upload.single('file'), async (req, res) => {
@@ -121,10 +189,23 @@ app.post('/upload', checkApiKey, upload.single('file'), async (req, res) => {
       return res.status(413).json({ error: 'PDF demasiado grande' });
     }
 
-    const userId = requireEnv('GRAPH_TARGET_USER_ID');
     const folder = (process.env.CV_UPLOAD_FOLDER || 'ManatalCV').replace(/^\/+|\/+$/g, '') || 'ManatalCV';
     const safeFile = `manatal-${manatalId}-cv.pdf`;
     const itemPath = `${folder}/${safeFile}`;
+
+    if (storageMode() === 'blob') {
+      const { publicUrl } = await uploadToAzureBlob(buf, itemPath);
+      return res.status(200).json({
+        publicUrl,
+        url: publicUrl,
+        webViewLink: publicUrl,
+        manatalId,
+        path: itemPath,
+        storage: 'blob'
+      });
+    }
+
+    const userId = requireEnv('GRAPH_TARGET_USER_ID');
     const pathForUrl = itemPath
       .split('/')
       .map((seg) => encodeURIComponent(seg))
@@ -197,7 +278,8 @@ app.post('/upload', checkApiKey, upload.single('file'), async (req, res) => {
       url: publicUrl,
       webViewLink: publicUrl,
       manatalId,
-      path: itemPath
+      path: itemPath,
+      storage: 'onedrive'
     });
   } catch (e) {
     const status = e.status || 500;

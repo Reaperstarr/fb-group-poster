@@ -1,6 +1,11 @@
-# Manatal CV mirror → OneDrive (Azure)
+# Manatal CV mirror (Azure)
 
-Servidor Node que recibe el PDF desde la **extensión Manatal** (`POST` multipart) y lo sube al **OneDrive** de un usuario del tenant usando **Microsoft Graph** y la app registrada en Entra ID (**client credentials**).
+Servidor Node que recibe el PDF desde la **extensión Manatal** (`POST` multipart) y lo guarda en:
+
+- **Azure Blob Storage** (recomendado si no tenés Microsoft 365 / licencia SharePoint), o
+- **OneDrive de empresa** vía **Microsoft Graph** (app Entra + `GRAPH_TARGET_USER_ID`).
+
+Si definís **`AZURE_STORAGE_CONNECTION_STRING`** en la Web App, se usa **solo Blob** y no hace falta `AZURE_TENANT_ID` / Graph para subir. **`/health`** incluye `"storage":"blob"` o `"onedrive"`.
 
 ## Qué URL poner en la extensión
 
@@ -29,7 +34,25 @@ Si configurás `MIRROR_API_KEY` en Azure, en la extensión rellená también **C
 
 ### 2) Variables de entorno (Application settings)
 
-En la Web App → **Settings** → **Environment variables** (o **Configuration** en portales viejos) → **Application settings** → **Add**:
+En la Web App → **Settings** → **Environment variables** → **Application settings** → **Add**.
+
+**Opción sin M365 — Blob Storage**
+
+1. Portal → **Create a resource** → **Storage account** → crear (mismo resource group que la Web App está bien). **Redundancy** LRS alcanza para pruebas; **Public access** puede dejarse en deshabilitado (el servidor usa SAS).
+2. **Storage account** → **Containers** → **+ Container** → nombre `manatal-cv` (o el que pongas en `AZURE_STORAGE_CONTAINER`).
+3. **Access keys** → copiar **Connection string** (key1).
+
+| Nombre | Valor |
+|--------|--------|
+| `AZURE_STORAGE_CONNECTION_STRING` | Connection string completa |
+| `AZURE_STORAGE_CONTAINER` | Opcional; por defecto `manatal-cv` |
+| `CV_UPLOAD_FOLDER` | Opcional; prefijo de “carpeta” dentro del contenedor (ej. `ManatalCV`) |
+| `BLOB_SAS_EXPIRY_DAYS` | Opcional; días de validez del enlace de lectura (por defecto `365`) |
+| `MIRROR_API_KEY` | Opcional; misma clave en la extensión |
+
+Podés **eliminar** de la Web App las variables de Graph (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `GRAPH_TARGET_USER_ID`) si solo usás Blob.
+
+**Opción OneDrive (Graph + M365/SPO en el tenant)**
 
 | Nombre | Valor |
 |--------|--------|
@@ -39,6 +62,8 @@ En la Web App → **Settings** → **Environment variables** (o **Configuration*
 | `GRAPH_TARGET_USER_ID` | Object ID del usuario cuyo OneDrive guardará los CV (ver abajo) |
 | `CV_UPLOAD_FOLDER` | Opcional; por defecto `ManatalCV` |
 | `MIRROR_API_KEY` | Opcional; si lo pones, misma clave en la extensión |
+
+**No** definas `AZURE_STORAGE_CONNECTION_STRING` si querés seguir con OneDrive.
 
 **WEBSITES_PORT**: Azure lo suele inyectar solo; no hace falta tocarlo.
 
@@ -70,6 +95,14 @@ az webapp up --name <TU-APP> --resource-group <TU-RG> --runtime "NODE:20-lts"
 ```
 
 (Ajustá según tengas CLI logueado y runtime disponible en tu región.)
+
+**Opción C — GitHub Actions (repo con workflow `main_mirrorcv.yml`)**
+
+1. En Azure: Web App **mirrorcv** → **Overview** → **Get publish profile** (descarga un `.PublishSettings` XML).
+2. En GitHub: repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+   - Nombre: `AZURE_WEBAPP_PUBLISH_PROFILE`
+   - Valor: **pega el contenido completo** del XML (todo el archivo).
+3. Hacé push a `main` tocando `manatal-cv-mirror/**` o el workflow; la acción ejecuta `npm ci` y despliega la carpeta `manatal-cv-mirror` a la app.
 
 **Startup command** (si hace falta): en **Configuration** → **General settings** → **Startup Command**:
 

@@ -12,6 +12,7 @@
     "dev": "node --env-file=.env server.js"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.27.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "multer": "^2.0.0"
