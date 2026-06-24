@@ -53,6 +53,18 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+
+  <div class="modal" id="fleetModal" hidden>
+    <div class="modal__backdrop" id="modalBackdrop"></div>
+    <div class="modal__sheet" role="dialog" aria-modal="true">
+      <div class="modal__head">
+        <h2 id="modalTitle">Details</h2>
+        <button type="button" class="icon-btn" id="modalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal__body" id="modalBody"></div>
+    </div>
+  </div>
+
   <script src="panel.js"></script>
 </body>
 </html>

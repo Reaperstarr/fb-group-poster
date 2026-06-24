@@ -127,6 +127,23 @@ function listInstances() {
     .sort((a, b) => String(a.instanceName).localeCompare(String(b.instanceName)));
 }
 
+function publicInstance(row) {
+  const enriched = enrichInstance(row);
+  const hasScreenshot = !!enriched.lastScreenshotB64;
+  const { lastScreenshotB64, ...rest } = enriched;
+  return { ...rest, hasScreenshot };
+}
+
+function listInstancesPublic() {
+  return listInstances().map(publicInstance);
+}
+
+function removeInstance(deviceId) {
+  delete store.instances[deviceId];
+  delete store.queues[deviceId];
+  saveFleetStore();
+}
+
 function enqueueCommand(deviceId, command, meta) {
   if (!store.queues[deviceId]) store.queues[deviceId] = [];
   const item = {
@@ -391,6 +408,11 @@ async function handleCommand(req, res, url) {
     }
     const deviceId = safeDeviceId(target);
     if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
+    if (command === 'status') {
+      const inst = publicInstance(store.instances[deviceId] || {});
+      const item = enqueueCommand(deviceId, command, { source: 'webapp' });
+      return fleetJson(res, 200, { ok: true, queued: item, instance: inst });
+    }
     const item = enqueueCommand(deviceId, command, { source: 'webapp' });
     return fleetJson(res, 200, { ok: true, queued: item });
   } catch (e) {
@@ -400,7 +422,7 @@ async function handleCommand(req, res, url) {
 
 async function handleDashboard(req, res, url) {
   if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
-  const instances = listInstances();
+  const instances = listInstancesPublic();
   const summary = {
     total: instances.length,
     posting: instances.filter((i) => i.state === 'posting').length,
@@ -421,6 +443,7 @@ async function handleScreenshot(req, res) {
     const inst = store.instances[deviceId];
     if (inst) {
       inst.lastScreenshotAt = new Date().toISOString();
+      if (b64.length <= 400000) inst.lastScreenshotB64 = b64;
       saveFleetStore();
     }
     const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
@@ -428,6 +451,35 @@ async function handleScreenshot(req, res) {
       await sendTelegramPhoto(chatId, b64, `[${safeInstanceName(inst?.instanceName)}] screenshot`);
     }
     return fleetJson(res, 200, { ok: true });
+  } catch (e) {
+    return fleetJson(res, 500, { ok: false, message: e.message });
+  }
+}
+
+async function handleGetScreenshot(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
+  if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
+  const inst = store.instances[deviceId];
+  if (!inst?.lastScreenshotB64) return fleetJson(res, 404, { ok: false, message: 'No screenshot' });
+  return fleetJson(res, 200, {
+    ok: true,
+    deviceId,
+    instanceName: inst.instanceName,
+    capturedAt: inst.lastScreenshotAt || null,
+    imageBase64: inst.lastScreenshotB64,
+  });
+}
+
+async function handleRemove(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  try {
+    const body = await collectJson(req);
+    const deviceId = safeDeviceId(body.deviceId);
+    if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
+    if (!store.instances[deviceId]) return fleetJson(res, 404, { ok: false, message: 'Not found' });
+    removeInstance(deviceId);
+    return fleetJson(res, 200, { ok: true, removed: deviceId });
   } catch (e) {
     return fleetJson(res, 500, { ok: false, message: e.message });
   }
@@ -484,6 +536,14 @@ async function handleFleetRequest(req, res, urlPath, url) {
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/screenshot') {
     await handleScreenshot(req, res);
+    return true;
+  }
+  if (req.method === 'GET' && urlPath === '/api/fleet/screenshot') {
+    await handleGetScreenshot(req, res, url);
+    return true;
+  }
+  if (req.method === 'POST' && urlPath === '/api/fleet/remove') {
+    await handleRemove(req, res, url);
     return true;
   }
   if (req.method === 'GET' && urlPath === '/api/fleet/config') {

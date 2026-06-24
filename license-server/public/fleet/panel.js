@@ -3,11 +3,12 @@
 
   const tg = window.Telegram?.WebApp;
   const API_BASE = window.location.origin;
-  const FLEET_KEY_STORAGE = 'irishka_fleet_panel_key';
+  const FLEET_KEY_STORAGE = 'irishka_fleet_panel_key_v1';
   let initData = '';
   let fleetKey = '';
   let refreshTimer = null;
   let installPrompt = null;
+  let instancesCache = [];
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -22,6 +23,25 @@
     idle: '⚪',
     offline: '🔴',
   };
+
+  function saveFleetKey(key) {
+    fleetKey = key;
+    try { localStorage.setItem(FLEET_KEY_STORAGE, key); } catch (_) {}
+  }
+
+  function loadFleetKey() {
+    try {
+      fleetKey = localStorage.getItem(FLEET_KEY_STORAGE) || '';
+    } catch (_) {
+      fleetKey = '';
+    }
+    return fleetKey;
+  }
+
+  function clearFleetKey() {
+    fleetKey = '';
+    try { localStorage.removeItem(FLEET_KEY_STORAGE); } catch (_) {}
+  }
 
   function headers() {
     const h = { 'Content-Type': 'application/json' };
@@ -60,7 +80,7 @@
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { el.hidden = true; }, 2800);
+    toast._t = setTimeout(() => { el.hidden = true; }, 3200);
   }
 
   function setSummaryLine(text) {
@@ -71,6 +91,42 @@
   function pct(done, total) {
     if (!total) return 0;
     return Math.min(100, Math.round((done / total) * 100));
+  }
+
+  function openModal(title, html) {
+    const modal = document.getElementById('fleetModal');
+    const titleEl = document.getElementById('modalTitle');
+    const bodyEl = document.getElementById('modalBody');
+    if (!modal || !titleEl || !bodyEl) return;
+    titleEl.textContent = title;
+    bodyEl.innerHTML = html;
+    modal.hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    const modal = document.getElementById('fleetModal');
+    if (!modal) return;
+    modal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  function statusHtml(inst) {
+    const p = inst.progress || {};
+    const rows = [
+      ['State', STATE_LABEL[inst.state] || inst.state],
+      ['Progress', `${p.done || 0}/${p.total || 0} (${p.ok || 0} ok)`],
+      ['Current group', p.currentGroup || '—'],
+      ['Extension', inst.extensionVersion || '—'],
+      ['Last seen', inst.lastHeartbeatAt ? new Date(inst.lastHeartbeatAt).toLocaleString() : '—'],
+    ];
+    if (inst.stopReason) rows.push(['Stop reason', inst.stopReason]);
+    if (inst.lastCommandResult?.message) {
+      rows.push(['Last command', inst.lastCommandResult.message]);
+    }
+    return rows.map(([k, v]) =>
+      `<div class="modal__row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`
+    ).join('');
   }
 
   function renderSummary(summary) {
@@ -87,6 +143,7 @@
   }
 
   function renderInstances(instances) {
+    instancesCache = instances;
     const list = document.getElementById('instanceList');
     const empty = document.getElementById('emptyState');
     if (!instances.length) {
@@ -121,10 +178,11 @@
           ${group}
           ${total > 0 ? `<div class="progress"><div class="progress__bar" style="width:${bar}%"></div></div>` : ''}
           <div class="card__actions">
-            <button type="button" class="btn btn--sm btn--ghost" data-cmd="status" data-target="${escapeAttr(inst.deviceId)}">📊</button>
-            <button type="button" class="btn btn--sm btn--warn" data-cmd="stop" data-target="${escapeAttr(inst.deviceId)}">⏸</button>
-            <button type="button" class="btn btn--sm btn--ok" data-cmd="resume" data-target="${escapeAttr(inst.deviceId)}">▶</button>
-            <button type="button" class="btn btn--sm btn--ghost" data-cmd="screenshot" data-target="${escapeAttr(inst.deviceId)}">📸</button>
+            <button type="button" class="btn btn--sm btn--ghost" data-cmd="status" data-target="${escapeAttr(inst.deviceId)}" title="Status">📊</button>
+            <button type="button" class="btn btn--sm btn--warn" data-cmd="stop" data-target="${escapeAttr(inst.deviceId)}" title="Pause">⏸</button>
+            <button type="button" class="btn btn--sm btn--ok" data-cmd="resume" data-target="${escapeAttr(inst.deviceId)}" title="Resume">▶</button>
+            <button type="button" class="btn btn--sm btn--ghost" data-cmd="screenshot" data-target="${escapeAttr(inst.deviceId)}" title="Screenshot">📸</button>
+            <button type="button" class="btn btn--sm btn--danger" data-cmd="remove" data-target="${escapeAttr(inst.deviceId)}" title="Remove">🗑</button>
           </div>
         </article>`;
     }).join('');
@@ -149,7 +207,9 @@
 
   function showAuthGate() {
     const gate = document.getElementById('authGate');
+    const input = document.getElementById('authFleetKey');
     if (gate) gate.hidden = false;
+    if (input && fleetKey) input.value = fleetKey;
     setSummaryLine('Enter fleet secret to unlock panel');
     document.getElementById('summaryCards').innerHTML = '';
     document.getElementById('instanceList').innerHTML = '';
@@ -172,20 +232,102 @@
       renderSummary(data.summary || { total: 0, posting: 0, paused: 0, idle: 0, offline: 0 });
       renderInstances(data.instances || []);
       document.getElementById('lastSync').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      return data;
     } catch (e) {
       if (e.status === 401) {
-        fleetKey = '';
-        try { sessionStorage.removeItem(FLEET_KEY_STORAGE); } catch (_) {}
+        clearFleetKey();
         showAuthGate();
         toast('Unauthorized — enter fleet secret');
-        return;
+        return null;
       }
       setSummaryLine('Could not load fleet');
       toast('Could not load fleet');
+      return null;
+    }
+  }
+
+  function findInstance(deviceId) {
+    return instancesCache.find((i) => i.deviceId === deviceId) || null;
+  }
+
+  async function showStatus(deviceId) {
+    let inst = findInstance(deviceId);
+    try {
+      const resp = await apiPost('/api/fleet/command', { command: 'status', deviceId, target: deviceId });
+      if (resp.instance) inst = resp.instance;
+    } catch (_) {}
+    if (!inst) {
+      const data = await refresh();
+      inst = (data?.instances || []).find((i) => i.deviceId === deviceId);
+    }
+    if (!inst) {
+      toast('Instance not found');
+      return;
+    }
+    openModal(`${inst.instanceName || 'Irishka'} — Status`, statusHtml(inst));
+  }
+
+  async function requestScreenshot(deviceId) {
+    const inst = findInstance(deviceId);
+    const name = inst?.instanceName || 'Irishka';
+    toast(`📸 Capturing ${name}…`);
+    const before = inst?.lastScreenshotAt || '';
+    try {
+      await apiPost('/api/fleet/command', { command: 'screenshot', deviceId, target: deviceId });
+    } catch (e) {
+      toast(e.status === 401 ? 'Unauthorized' : 'Screenshot command failed');
+      return;
+    }
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
+        if (shot.ok && shot.imageBase64) {
+          openModal(
+            `${name} — Screenshot`,
+            `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
+            `<img src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">`
+          );
+          await refresh();
+          return;
+        }
+      } catch (e) {
+        if (e.status !== 404) break;
+      }
+      const data = await refresh();
+      const updated = (data?.instances || []).find((x) => x.deviceId === deviceId);
+      if (updated?.lastScreenshotAt && updated.lastScreenshotAt !== before) break;
+    }
+    toast('Screenshot timeout — is the PC online with Facebook open?');
+  }
+
+  async function removeInstance(deviceId) {
+    const inst = findInstance(deviceId);
+    const name = inst?.instanceName || deviceId;
+    if (!confirm(`Remove "${name}" from the fleet list?`)) return;
+    try {
+      await apiPost('/api/fleet/remove', { deviceId });
+      toast(`Removed ${name}`);
+      closeModal();
+      await refresh();
+    } catch (e) {
+      toast(e.status === 401 ? 'Unauthorized' : 'Could not remove');
     }
   }
 
   async function sendCommand(command, target) {
+    if (command === 'status' && target !== 'all') {
+      await showStatus(target);
+      return;
+    }
+    if (command === 'screenshot' && target !== 'all') {
+      await requestScreenshot(target);
+      return;
+    }
+    if (command === 'remove' && target !== 'all') {
+      await removeInstance(target);
+      return;
+    }
     try {
       await apiPost('/api/fleet/command', { command, deviceId: target, target });
       const label = target === 'all' ? 'all instances' : 'instance';
@@ -200,6 +342,7 @@
     document.body.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-cmd]');
       if (!btn) return;
+      e.preventDefault();
       const cmd = btn.getAttribute('data-cmd');
       const target = btn.getAttribute('data-target') || 'all';
       sendCommand(cmd, target);
@@ -226,10 +369,12 @@
         toast('Paste fleet secret');
         return;
       }
-      fleetKey = key;
-      try { sessionStorage.setItem(FLEET_KEY_STORAGE, key); } catch (_) {}
+      saveFleetKey(key);
       await refresh();
+      if (!refreshTimer) refreshTimer = setInterval(refresh, 12000);
     });
+    document.getElementById('modalClose')?.addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop')?.addEventListener('click', closeModal);
   }
 
   function setupInstallPrompt() {
@@ -269,11 +414,7 @@
   }
 
   async function init() {
-    try {
-      fleetKey = sessionStorage.getItem(FLEET_KEY_STORAGE) || '';
-    } catch (_) {
-      fleetKey = '';
-    }
+    loadFleetKey();
 
     if (tg) {
       tg.ready();
@@ -291,6 +432,9 @@
       showAuthGate();
       return;
     }
+
+    const input = document.getElementById('authFleetKey');
+    if (input && fleetKey) input.value = fleetKey;
 
     await refresh();
     refreshTimer = setInterval(refresh, 12000);
