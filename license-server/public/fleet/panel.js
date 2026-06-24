@@ -7,6 +7,7 @@
   let initData = '';
   let fleetKey = '';
   let refreshTimer = null;
+  let installPrompt = null;
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -207,6 +208,17 @@
       refresh();
       toast('Refreshing…');
     });
+    document.getElementById('btnInstall')?.addEventListener('click', async () => {
+      if (installPrompt) {
+        installPrompt.prompt();
+        await installPrompt.userChoice;
+        installPrompt = null;
+        const btn = document.getElementById('btnInstall');
+        if (btn) btn.hidden = true;
+        return;
+      }
+      toast('Use browser menu → Install app / Add to Home Screen');
+    });
     document.getElementById('btnAuthUnlock')?.addEventListener('click', async () => {
       const input = document.getElementById('authFleetKey');
       const key = String(input?.value || '').trim();
@@ -218,6 +230,42 @@
       try { sessionStorage.setItem(FLEET_KEY_STORAGE, key); } catch (_) {}
       await refresh();
     });
+  }
+
+  function setupInstallPrompt() {
+    const inTelegram = !!(tg && tg.initData);
+    if (inTelegram) return;
+
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    const hint = document.getElementById('installHint');
+    const btnInstall = document.getElementById('btnInstall');
+
+    if (isStandalone) {
+      if (hint) hint.hidden = true;
+      if (btnInstall) btnInstall.hidden = true;
+      return;
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      installPrompt = e;
+      if (btnInstall) btnInstall.hidden = false;
+      if (hint) {
+        hint.hidden = false;
+        hint.textContent = 'Tap ⬇ to install Irishka Fleet on this device.';
+      }
+    });
+
+    if (isIos && hint) {
+      hint.hidden = false;
+      hint.textContent = 'iPhone: Share → Add to Home Screen to install as app.';
+    }
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/fleet/sw.js', { scope: '/fleet/' }).catch(() => {});
   }
 
   async function init() {
@@ -236,6 +284,8 @@
     }
 
     bindActions();
+    registerServiceWorker();
+    setupInstallPrompt();
 
     if (!initData && !fleetKey) {
       showAuthGate();

@@ -189,6 +189,13 @@ html, body {
   color: var(--muted);
 }
 
+.install-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--accent);
+}
+
 .toast {
   position: fixed;
   left: 50%;

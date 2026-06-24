@@ -314,7 +314,13 @@ function serveStatic(req, res, urlPath) {
   }
   if (!fs.existsSync(filePath)) return false;
   const ext = path.extname(filePath);
-  const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'application/javascript' };
+  const types = {
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.webmanifest': 'application/manifest+json',
+    '.png': 'image/png',
+  };
   const body = fs.readFileSync(filePath);
   res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream', 'Cache-Control': 'no-store' });
   res.end(body);
