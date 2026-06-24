@@ -370,6 +370,10 @@ async function handleHeartbeat(req, res) {
       extensionVersion: String(body.extensionVersion || '').slice(0, 20),
       lastHeartbeatAt: new Date().toISOString(),
       lastCommandResult: body.lastCommandResult || prev.lastCommandResult || null,
+      facebookConnected: !!body.facebookConnected,
+      facebookUserName: String(body.facebookUserName || '').slice(0, 80),
+      facebookTabCount: Number(body.facebookTabCount) || 0,
+      facebookReason: String(body.facebookReason || '').slice(0, 120),
     };
     saveFleetStore();
     return fleetJson(res, 200, { ok: true, state });

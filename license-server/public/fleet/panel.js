@@ -113,8 +113,13 @@
 
   function statusHtml(inst) {
     const p = inst.progress || {};
+    const fbLine = inst.facebookConnected
+      ? (inst.facebookUserName || 'Connected')
+      : (inst.facebookReason || 'Not connected');
     const rows = [
       ['State', STATE_LABEL[inst.state] || inst.state],
+      ['Facebook', inst.facebookConnected ? `✓ ${fbLine}` : `✗ ${fbLine}`],
+      ['FB tabs open', String(inst.facebookTabCount || 0)],
       ['Progress', `${p.done || 0}/${p.total || 0} (${p.ok || 0} ok)`],
       ['Current group', p.currentGroup || '—'],
       ['Extension', inst.extensionVersion || '—'],
@@ -166,6 +171,9 @@
       const meta = st === 'offline'
         ? `Last seen ${formatAgo(inst.offlineSinceMs)}`
         : `${done}/${total} groups · ${ok} ok`;
+      const fbBadge = inst.facebookConnected
+        ? `<div class="card__fb card__fb--ok">📘 ${escapeHtml(inst.facebookUserName || 'Facebook OK')}</div>`
+        : `<div class="card__fb card__fb--bad">📘 ${escapeHtml(inst.facebookReason || 'Facebook offline')}</div>`;
       const group = p.currentGroup ? `<div class="card__group">📍 ${escapeHtml(p.currentGroup)}</div>` : '';
       return `
         <article class="card" data-id="${escapeAttr(inst.deviceId)}">
@@ -175,6 +183,7 @@
             <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
           </div>
           <div class="card__meta">${meta}</div>
+          ${fbBadge}
           ${group}
           ${total > 0 ? `<div class="progress"><div class="progress__bar" style="width:${bar}%"></div></div>` : ''}
           <div class="card__actions">
