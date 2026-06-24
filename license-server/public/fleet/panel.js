@@ -305,7 +305,33 @@
       }
       const data = await refresh();
       const updated = (data?.instances || []).find((x) => x.deviceId === deviceId);
-      if (updated?.lastScreenshotAt && updated.lastScreenshotAt !== before) break;
+      const lr = updated?.lastCommandResult;
+      if (lr?.command === 'screenshot' && lr.at && lr.ok === false) {
+        toast(lr.message || 'Screenshot failed');
+        return;
+      }
+      if (updated?.lastScreenshotAt && updated.lastScreenshotAt !== before) {
+        try {
+          const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
+          if (shot.ok && shot.imageBase64) {
+            openModal(
+              `${name} — Screenshot`,
+              `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
+              `<img src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">`
+            );
+            await refresh();
+            return;
+          }
+        } catch (_) {}
+        break;
+      }
+    }
+    const data = await refresh();
+    const updated = (data?.instances || []).find((x) => x.deviceId === deviceId);
+    const lr = updated?.lastCommandResult;
+    if (lr?.command === 'screenshot' && lr.message) {
+      toast(lr.ok ? 'Screenshot sent — reload panel' : lr.message);
+      return;
     }
     toast('Screenshot timeout — is the PC online with Facebook open?');
   }

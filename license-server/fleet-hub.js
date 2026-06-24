@@ -443,11 +443,18 @@ async function handleScreenshot(req, res) {
     const body = await collectJson(req);
     const deviceId = safeDeviceId(body.deviceId);
     const b64 = String(body.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
-    if (!deviceId || !b64) return fleetJson(res, 400, { ok: false });
+    if (!deviceId || !b64) return fleetJson(res, 400, { ok: false, message: 'deviceId and image required' });
+    const MAX_B64 = 1_200_000;
+    if (b64.length > MAX_B64) {
+      return fleetJson(res, 413, {
+        ok: false,
+        message: `Screenshot too large (${Math.round(b64.length / 1024)}KB)`,
+      });
+    }
     const inst = store.instances[deviceId];
     if (inst) {
       inst.lastScreenshotAt = new Date().toISOString();
-      if (b64.length <= 400000) inst.lastScreenshotB64 = b64;
+      inst.lastScreenshotB64 = b64;
       saveFleetStore();
     }
     const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
