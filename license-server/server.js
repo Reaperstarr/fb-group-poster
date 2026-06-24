@@ -4,10 +4,18 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const Stripe = require('stripe');
+const { initFleetHub, handleFleetRequest } = require('./fleet-hub');
 
 const PORT = Number(process.env.PORT || 8787);
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+/** Return URL after the customer leaves Stripe Billing Portal (must be https in production). */
+const STRIPE_BILLING_PORTAL_RETURN_URL = process.env.STRIPE_BILLING_PORTAL_RETURN_URL || 'https://fb-group-poster-production.up.railway.app/';
+/**
+ * Optional: Stripe Dashboard → Settings → Billing → Customer portal → “Login link”
+ * (https://billing.stripe.com/p/login/…). Used when no stripeCustomerId is stored for the license.
+ */
+const STRIPE_PORTAL_LOGIN_URL = process.env.STRIPE_PORTAL_LOGIN_URL || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || '';
 const APP_NAME = process.env.APP_NAME || 'Irishka Group Master by SBS';
@@ -15,7 +23,10 @@ const ALLOW_DEMO_ENDPOINT = String(process.env.ALLOW_DEMO_ENDPOINT || 'false').t
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || '';
 const MAX_DEVICES_PER_LICENSE = Math.max(1, Number(process.env.MAX_DEVICES_PER_LICENSE || 1));
 
-const STORE_FILE = path.join(__dirname, 'licenses.json');
+/** En Railway: monta un volumen en /data y define LICENSE_STORE_FILE=/data/licenses.json */
+const STORE_FILE = process.env.LICENSE_STORE_FILE
+  ? path.resolve(process.env.LICENSE_STORE_FILE)
+  : path.join(__dirname, 'licenses.json');
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const licenses = new Map(); // key -> { email, plan, active, createdAt, updatedAt }
 
@@ -24,7 +35,8 @@ function json(res, code, payload) {
   res.writeHead(code, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   });
   res.end(body);
 }
@@ -59,6 +71,22 @@ function safeDeviceId(deviceId) {
   return d;
 }
 
+/**
+ * Clave canónica = exactamente 16 hex en mayúsculas (makeLicenseKey).
+ * Así coincide el pegado desde el email con la entrada en Map aunque el JSON tenga minúsculas.
+ * Si hay más de 16 hex (doble pegado), se usan los primeros 16.
+ */
+function canonicalLicenseKey(raw) {
+  const hex = String(raw || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length === 16) return hex;
+  if (hex.length > 16) return hex.slice(0, 16);
+  return '';
+}
+
+function normalizeIncomingLicenseKey(raw) {
+  return canonicalLicenseKey(raw);
+}
+
 function saveStore() {
   const rows = [];
   for (const [key, value] of licenses.entries()) rows.push({ key, value });
@@ -73,7 +101,8 @@ function loadStore() {
     if (!Array.isArray(rows)) return;
     rows.forEach((row) => {
       if (!row || !row.key || !row.value) return;
-      licenses.set(String(row.key), row.value);
+      const ck = canonicalLicenseKey(row.key);
+      licenses.set(ck || String(row.key).trim().toUpperCase(), row.value);
     });
   } catch (e) {
     console.error('Could not load licenses.json:', e.message);
@@ -191,9 +220,14 @@ function getEmailFromStripeEvent(event) {
 async function handleValidate(req, res) {
   try {
     const body = await collectJson(req);
-    const key = String(body.licenseKey || '').trim().toUpperCase();
+    const key = canonicalLicenseKey(body.licenseKey || '');
     const deviceId = safeDeviceId(body.deviceId || '');
-    if (!key) return json(res, 400, { valid: false, message: 'Missing license key' });
+    if (!key) {
+      return json(res, 400, {
+        valid: false,
+        message: 'Missing or invalid license key (need 16 hexadecimal characters)'
+      });
+    }
     if (!deviceId) return json(res, 400, { valid: false, message: 'Missing or invalid deviceId' });
     const lic = licenses.get(key);
     if (!lic) return json(res, 200, { valid: false, message: 'License not found' });
@@ -239,7 +273,7 @@ async function handleValidate(req, res) {
 async function handleTransferDevice(req, res) {
   try {
     const body = await collectJson(req);
-    const key = String(body.licenseKey || '').trim().toUpperCase();
+    const key = normalizeIncomingLicenseKey(body.licenseKey || '');
     const deviceId = safeDeviceId(body.deviceId || '');
     if (!key) return json(res, 400, { ok: false, message: 'Missing license key' });
     if (!deviceId) return json(res, 400, { ok: false, message: 'Missing or invalid deviceId' });
@@ -270,6 +304,37 @@ async function handleTransferDevice(req, res) {
   }
 }
 
+/** One-click Billing Portal: prefers Stripe session for stored customer; else STRIPE_PORTAL_LOGIN_URL. */
+async function handleBillingPortalSession(req, res) {
+  try {
+    const body = await collectJson(req);
+    const key = normalizeIncomingLicenseKey(body.licenseKey || '');
+    if (!key) return json(res, 400, { ok: false, message: 'Missing license key' });
+    const lic = licenses.get(key);
+    if (!lic) return json(res, 404, { ok: false, message: 'License not found' });
+
+    if (stripe && lic.stripeCustomerId) {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: lic.stripeCustomerId,
+        return_url: STRIPE_BILLING_PORTAL_RETURN_URL
+      });
+      return json(res, 200, { ok: true, url: session.url });
+    }
+
+    if (STRIPE_PORTAL_LOGIN_URL) {
+      return json(res, 200, { ok: true, url: STRIPE_PORTAL_LOGIN_URL });
+    }
+
+    return json(res, 503, {
+      ok: false,
+      message: 'Billing portal not configured (set STRIPE_PORTAL_LOGIN_URL in the server or complete a new checkout to link your Stripe customer)'
+    });
+  } catch (e) {
+    console.error('billingPortalSession', e.message || e);
+    return json(res, 500, { ok: false, message: e.message || 'Portal error' });
+  }
+}
+
 async function handleStripeWebhook(req, res) {
   if (!stripe || !STRIPE_WEBHOOK_SECRET) {
     return json(res, 500, { ok: false, message: 'Stripe not configured' });
@@ -280,11 +345,27 @@ async function handleStripeWebhook(req, res) {
     const event = stripe.webhooks.constructEvent(raw, sig, STRIPE_WEBHOOK_SECRET);
 
     if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
       const email = getEmailFromStripeEvent(event);
       const plan = 'PRO';
       const key = createOrActivateLicense(email, plan);
+      const customerRaw = session.customer;
+      const customerId = typeof customerRaw === 'string'
+        ? customerRaw
+        : (customerRaw && customerRaw.id) || '';
+      if (key && customerId) {
+        const lic = licenses.get(key);
+        if (lic) {
+          licenses.set(key, {
+            ...lic,
+            stripeCustomerId: customerId,
+            updatedAt: new Date().toISOString()
+          });
+          saveStore();
+        }
+      }
       const sent = await sendLicenseEmail(email, key, plan);
-      console.log('License activated', { email, key, plan, emailSent: sent });
+      console.log('License activated', { email, key, plan, emailSent: sent, stripeCustomerId: Boolean(customerId) });
     }
 
     if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
@@ -323,7 +404,7 @@ async function handleAdminResetDevice(req, res) {
   }
   try {
     const body = await collectJson(req);
-    const key = String(body.licenseKey || '').trim().toUpperCase();
+    const key = normalizeIncomingLicenseKey(body.licenseKey || '');
     if (!key) return json(res, 400, { ok: false, message: 'Missing license key' });
     const lic = licenses.get(key);
     if (!lic) return json(res, 404, { ok: false, message: 'License not found' });
@@ -340,20 +421,41 @@ async function handleAdminResetDevice(req, res) {
   }
 }
 
+/** Path sin query string ni barra final (Railway/proxies a veces añaden `/` o `?`). */
+function requestPath(url) {
+  const p = String(url || '').split('?')[0];
+  if (p.length > 1 && p.endsWith('/')) return p.slice(0, -1);
+  return p || '/';
+}
+
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
-  if (req.method === 'GET' && req.url === '/health') return json(res, 200, { ok: true });
-  if (req.method === 'POST' && req.url === '/api/license/validate') return handleValidate(req, res);
-  if (req.method === 'POST' && req.url === '/api/license/transfer-device') return handleTransferDevice(req, res);
-  if (req.method === 'POST' && req.url === '/api/stripe/webhook') return handleStripeWebhook(req, res);
-  if (req.method === 'POST' && req.url === '/api/license/create-demo') return handleCreateDemoLicense(req, res);
-  if (req.method === 'POST' && req.url === '/api/license/reset-device') return handleAdminResetDevice(req, res);
+  const url = new URL(req.url || '/', 'http://127.0.0.1');
+  const path = requestPath(req.url);
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+    });
+    res.end();
+    return;
+  }
+  if (req.method === 'GET' && path === '/health') return json(res, 200, { ok: true });
+  if (await handleFleetRequest(req, res, path, url)) return;
+  if (req.method === 'POST' && path === '/api/license/validate') return handleValidate(req, res);
+  if (req.method === 'POST' && path === '/api/license/transfer-device') return handleTransferDevice(req, res);
+  if (req.method === 'POST' && path === '/api/billing-portal-session') return handleBillingPortalSession(req, res);
+  if (req.method === 'POST' && path === '/api/stripe/webhook') return handleStripeWebhook(req, res);
+  if (req.method === 'POST' && path === '/api/license/create-demo') return handleCreateDemoLicense(req, res);
+  if (req.method === 'POST' && path === '/api/license/reset-device') return handleAdminResetDevice(req, res);
   return json(res, 404, { ok: false, message: 'Not found' });
 });
 
 loadStore();
+initFleetHub();
 server.listen(PORT, () => {
   console.log(`License server listening on http://localhost:${PORT}`);
+  console.log('License store file:', STORE_FILE);
   console.log('Demo endpoint enabled:', ALLOW_DEMO_ENDPOINT ? 'yes' : 'no');
   console.log('Max devices per license:', MAX_DEVICES_PER_LICENSE);
 });

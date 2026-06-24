@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Irishka Fleet</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="header">
+      <div class="header__brand">
+        <span class="header__logo">🍀</span>
+        <div>
+          <h1>Irishka Fleet</h1>
+          <p class="header__sub" id="summaryLine">Loading…</p>
+        </div>
+      </div>
+      <button type="button" class="icon-btn" id="btnRefresh" title="Refresh">↻</button>
+    </header>
+
+    <section class="summary" id="summaryCards"></section>
+
+    <section class="toolbar">
+      <button type="button" class="btn btn--ghost" data-cmd="status" data-target="all">📊 All status</button>
+      <button type="button" class="btn btn--warn" data-cmd="stop" data-target="all">⏸ Pause all</button>
+      <button type="button" class="btn btn--ok" data-cmd="resume" data-target="all">▶ Resume all</button>
+    </section>
+
+    <main class="list" id="instanceList">
+      <div class="empty" id="emptyState">No Irishkas connected yet.</div>
+    </main>
+
+    <footer class="footer">
+      <span id="lastSync">—</span>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="panel.js"></script>
+</body>
+</html>
