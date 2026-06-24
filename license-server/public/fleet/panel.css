@@ -204,3 +204,34 @@ html, body {
   max-width: 90vw;
   box-shadow: 0 8px 32px rgba(0,0,0,.4);
 }
+
+.auth-gate {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.auth-gate__lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.auth-gate__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card2);
+  color: var(--text);
+  padding: 12px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.auth-gate__btn {
+  width: 100%;
+}

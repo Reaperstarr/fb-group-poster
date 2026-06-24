@@ -169,9 +169,21 @@ function validateTelegramInitData(initData) {
   return { ok: true, user };
 }
 
-function webAppAuthOk(req) {
-  const initData = String(req.headers['x-telegram-init-data'] || '').trim();
-  if (initData) return validateTelegramInitData(initData).ok;
+function extractInitData(req, url) {
+  const fromHeader = String(req.headers['x-telegram-init-data'] || '').trim();
+  if (fromHeader) return fromHeader;
+  if (url && typeof url.searchParams?.get === 'function') {
+    return String(url.searchParams.get('initData') || '').trim();
+  }
+  return '';
+}
+
+function webAppAuthOk(req, url) {
+  const initData = extractInitData(req, url);
+  if (initData) {
+    const v = validateTelegramInitData(initData);
+    if (v.ok) return true;
+  }
   if (FLEET_SECRET && getBearer(req) === FLEET_SECRET) return true;
   return false;
 }
@@ -358,8 +370,8 @@ async function handlePoll(req, res, url) {
   return fleetJson(res, 200, item);
 }
 
-async function handleCommand(req, res) {
-  if (!webAppAuthOk(req)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+async function handleCommand(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
   try {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
@@ -380,8 +392,8 @@ async function handleCommand(req, res) {
   }
 }
 
-async function handleDashboard(req, res) {
-  if (!webAppAuthOk(req)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+async function handleDashboard(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
   const instances = listInstances();
   const summary = {
     total: instances.length,
@@ -457,11 +469,11 @@ async function handleFleetRequest(req, res, urlPath, url) {
     return true;
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/command') {
-    await handleCommand(req, res);
+    await handleCommand(req, res, url);
     return true;
   }
   if (req.method === 'GET' && urlPath === '/api/fleet/dashboard') {
-    await handleDashboard(req, res);
+    await handleDashboard(req, res, url);
     return true;
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/screenshot') {
