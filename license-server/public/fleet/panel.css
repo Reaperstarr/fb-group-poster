@@ -39,7 +39,14 @@ html, body {
 }
 
 .header__brand { display: flex; gap: 8px; align-items: center; }
-.header__logo { font-size: 24px; line-height: 1; }
+.header__logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.header__logo--emoji { font-size: 24px; line-height: 1; width: auto; height: auto; border-radius: 0; }
 .header h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
 .header__sub { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
 
@@ -78,6 +85,14 @@ html, body {
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 10px;
+}
+
+@media (max-width: 559px) {
+  .toolbar .btn {
+    min-height: 44px;
+    font-size: 12px;
+    padding: 10px 8px;
+  }
 }
 
 .btn {
@@ -131,11 +146,42 @@ html, body {
 }
 
 .card--dense {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 10px 8px;
+}
+
+.card__body {
+  display: flex;
   gap: 8px;
-  align-items: center;
-  padding: 8px 8px 8px 10px;
+  align-items: flex-start;
+  padding-bottom: 8px;
+}
+
+.card__actions--bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.btn--action {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px 4px;
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 10px;
+}
+
+@media (min-width: 560px) {
+  .btn--action {
+    min-height: 42px;
+    font-size: 18px;
+  }
 }
 
 @keyframes fadeIn {
@@ -148,7 +194,7 @@ html, body {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  align-self: center;
+  margin-top: 4px;
   box-shadow: 0 0 0 2px rgba(255,255,255,.05);
 }
 
@@ -235,6 +281,9 @@ html, body {
   flex-direction: column;
   gap: 3px;
 }
+
+/* legacy alias */
+.card__actions--bar { grid-template-columns: repeat(5, 1fr); }
 
 .empty {
   text-align: center;

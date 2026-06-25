@@ -339,25 +339,27 @@
         : '';
       return `
         <article class="card card--dense" data-id="${id}">
-          <span class="status-dot status-dot--${st}" title="${STATE_LABEL[st] || st}"></span>
-          <div class="card__main">
-            <div class="card__head">
-              <span class="card__title" title="${name}">${name}</span>
-              <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
+          <div class="card__body">
+            <span class="status-dot status-dot--${st}" title="${STATE_LABEL[st] || st}"></span>
+            <div class="card__main">
+              <div class="card__head">
+                <span class="card__title" title="${name}">${name}</span>
+                <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
+              </div>
+              <div class="card__sub">
+                <span class="card__stat">${meta}</span>
+                ${groupMark}
+                <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
+              </div>
+              ${progress}
             </div>
-            <div class="card__sub">
-              <span class="card__stat">${meta}</span>
-              ${groupMark}
-              <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
-            </div>
-            ${progress}
           </div>
-          <div class="card__actions card__actions--dense">
-            <button type="button" class="btn btn--icon btn--ghost" data-cmd="status" data-target="${id}" title="Status">📊</button>
-            <button type="button" class="btn btn--icon btn--warn" data-cmd="stop" data-target="${id}" title="Pause">⏸</button>
-            <button type="button" class="btn btn--icon btn--ok" data-cmd="resume" data-target="${id}" title="Resume">▶</button>
-            <button type="button" class="btn btn--icon btn--ghost" data-cmd="screenshot" data-target="${id}" title="Screenshot">📸</button>
-            <button type="button" class="btn btn--icon btn--danger" data-cmd="remove" data-target="${id}" title="Remove">🗑</button>
+          <div class="card__actions card__actions--bar">
+            <button type="button" class="btn btn--action btn--ghost" data-cmd="status" data-target="${id}" title="Status">📊</button>
+            <button type="button" class="btn btn--action btn--warn" data-cmd="stop" data-target="${id}" title="Pause">⏸</button>
+            <button type="button" class="btn btn--action btn--ok" data-cmd="resume" data-target="${id}" title="Resume">▶</button>
+            <button type="button" class="btn btn--action btn--ghost" data-cmd="screenshot" data-target="${id}" title="Screenshot">📸</button>
+            <button type="button" class="btn btn--action btn--danger" data-cmd="remove" data-target="${id}" title="Remove">🗑</button>
           </div>
         </article>`;
     }).join('');
