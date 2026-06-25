@@ -23,12 +23,27 @@
     offline: 'Offline',
   };
 
-  const STATE_ICON = {
-    posting: '🟢',
-    paused: '🟡',
-    idle: '⚪',
-    offline: '🔴',
+  const TONE_LABEL = {
+    live: 'Live',
+    paused: 'Paused',
+    error: 'Error',
+    idle: 'Idle',
+    offline: 'Offline',
   };
+
+  /** Color de tarjeta: live=verde, paused=amarillo, error=rojo, idle/offline=gris */
+  function cardTone(inst) {
+    const st = inst.state || 'offline';
+    const reason = String(inst.stopReason || '');
+    if (st === 'posting') return 'live';
+    if (st === 'offline') return 'offline';
+    if (st === 'idle') return 'idle';
+    if (st === 'paused') {
+      if (reason === 'post_failure_pause') return 'error';
+      return 'paused';
+    }
+    return 'idle';
+  }
 
   function saveFleetKey(key) {
     fleetKey = key;
@@ -317,6 +332,7 @@
     if (empty) empty.hidden = true;
     list.innerHTML = instances.map((inst) => {
       const st = inst.state || 'offline';
+      const tone = cardTone(inst);
       const p = inst.progress || {};
       const done = p.done || 0;
       const total = p.total || 0;
@@ -335,16 +351,15 @@
       const groupTip = p.currentGroup ? escapeAttr(p.currentGroup) : '';
       const groupMark = p.currentGroup ? `<span class="card__pin" title="${groupTip}">📍</span>` : '';
       const progress = total > 0
-        ? `<div class="progress progress--thin"><div class="progress__bar" style="width:${bar}%"></div></div>`
+        ? `<div class="progress progress--thin progress--${tone}"><div class="progress__bar" style="width:${bar}%"></div></div>`
         : '';
       return `
-        <article class="card card--dense" data-id="${id}">
+        <article class="card card--dense card--tone-${tone}" data-id="${id}" data-tone="${tone}">
           <div class="card__body">
-            <span class="status-dot status-dot--${st}" title="${STATE_LABEL[st] || st}"></span>
             <div class="card__main">
               <div class="card__head">
                 <span class="card__title" title="${name}">${name}</span>
-                <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
+                <span class="card__badge card__badge--${tone}">${TONE_LABEL[tone] || tone}</span>
               </div>
               <div class="card__sub">
                 <span class="card__stat">${meta}</span>
