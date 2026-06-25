@@ -9,6 +9,8 @@
   let refreshTimer = null;
   let installPrompt = null;
   let instancesCache = [];
+  let modalDeviceId = '';
+  let busy = false;
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -80,7 +82,16 @@
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { el.hidden = true; }, 3200);
+    toast._t = setTimeout(() => { el.hidden = true; }, 4500);
+  }
+
+  function setBusy(on, msg) {
+    busy = !!on;
+    const el = document.getElementById('busyOverlay');
+    const text = document.getElementById('busyText');
+    if (el) el.hidden = !on;
+    if (text && msg) text.textContent = msg;
+    document.querySelectorAll('[data-cmd]').forEach((b) => { b.disabled = on; });
   }
 
   function setSummaryLine(text) {
@@ -93,11 +104,12 @@
     return Math.min(100, Math.round((done / total) * 100));
   }
 
-  function openModal(title, html) {
+  function openModal(title, html, deviceId) {
     const modal = document.getElementById('fleetModal');
     const titleEl = document.getElementById('modalTitle');
     const bodyEl = document.getElementById('modalBody');
     if (!modal || !titleEl || !bodyEl) return;
+    modalDeviceId = deviceId || '';
     titleEl.textContent = title;
     bodyEl.innerHTML = html;
     modal.hidden = false;
@@ -108,7 +120,21 @@
     const modal = document.getElementById('fleetModal');
     if (!modal) return;
     modal.hidden = true;
+    modalDeviceId = '';
     document.body.style.overflow = '';
+  }
+
+  function modalActionsHtml(deviceId, inst) {
+    const id = escapeAttr(deviceId);
+    const lastShot = inst?.hasScreenshot
+      ? `<button type="button" class="btn btn--ghost modal__action" data-cmd="viewshot" data-target="${id}">🖼 Ver captura</button>`
+      : '';
+    return `<div class="modal__actions">
+      <button type="button" class="btn btn--ok modal__action modal__action--primary" data-cmd="screenshot" data-target="${id}">📸 Capturar pantalla</button>
+      ${lastShot}
+      <button type="button" class="btn btn--warn modal__action" data-cmd="stop" data-target="${id}">⏸ Pausar</button>
+      <button type="button" class="btn btn--ghost modal__action" data-cmd="resume" data-target="${id}">▶ Reanudar</button>
+    </div>`;
   }
 
   function statusHtml(inst) {
@@ -273,31 +299,59 @@
       toast('Instance not found');
       return;
     }
-    openModal(`${inst.instanceName || 'Irishka'} — Status`, statusHtml(inst));
+    openModal(`${inst.instanceName || 'Irishka'} — Status`, statusHtml(inst) + modalActionsHtml(deviceId, inst), deviceId);
+  }
+
+  async function showScreenshotModal(deviceId, name, shot) {
+    openModal(
+      `${name} — Screenshot`,
+      `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
+      `<img class="modal__shot" src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">` +
+      modalActionsHtml(deviceId, { hasScreenshot: true }),
+      deviceId
+    );
+  }
+
+  async function viewLastScreenshot(deviceId) {
+    const inst = findInstance(deviceId);
+    const name = inst?.instanceName || 'Irishka';
+    setBusy(true, `Cargando captura de ${name}…`);
+    try {
+      const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
+      if (shot.ok && shot.imageBase64) {
+        await showScreenshotModal(deviceId, name, shot);
+        return;
+      }
+      toast('No hay captura guardada');
+    } catch (e) {
+      toast(e.status === 404 ? 'No hay captura guardada' : 'No se pudo cargar la captura');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function requestScreenshot(deviceId) {
+    if (busy) return;
     const inst = findInstance(deviceId);
     const name = inst?.instanceName || 'Irishka';
-    toast(`📸 Capturing ${name}…`);
+    setBusy(true, `📸 Capturando ${name}…`);
+    toast(`📸 Capturando ${name}…`);
     const before = inst?.lastScreenshotAt || '';
     try {
       await apiPost('/api/fleet/command', { command: 'screenshot', deviceId, target: deviceId });
     } catch (e) {
       toast(e.status === 401 ? 'Unauthorized' : 'Screenshot command failed');
+      setBusy(false);
       return;
     }
-    for (let i = 0; i < 20; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 800 : 2000));
       try {
         const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
         if (shot.ok && shot.imageBase64) {
-          openModal(
-            `${name} — Screenshot`,
-            `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
-            `<img src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">`
-          );
+          await showScreenshotModal(deviceId, name, shot);
           await refresh();
+          setBusy(false);
           return;
         }
       } catch (e) {
@@ -308,18 +362,16 @@
       const lr = updated?.lastCommandResult;
       if (lr?.command === 'screenshot' && lr.at && lr.ok === false) {
         toast(lr.message || 'Screenshot failed');
+        setBusy(false);
         return;
       }
       if (updated?.lastScreenshotAt && updated.lastScreenshotAt !== before) {
         try {
           const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
           if (shot.ok && shot.imageBase64) {
-            openModal(
-              `${name} — Screenshot`,
-              `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
-              `<img src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">`
-            );
+            await showScreenshotModal(deviceId, name, shot);
             await refresh();
+            setBusy(false);
             return;
           }
         } catch (_) {}
@@ -331,9 +383,11 @@
     const lr = updated?.lastCommandResult;
     if (lr?.command === 'screenshot' && lr.message) {
       toast(lr.ok ? 'Screenshot sent — reload panel' : lr.message);
+      setBusy(false);
       return;
     }
-    toast('Screenshot timeout — is the PC online with Facebook open?');
+    toast('Timeout — ¿PC online con Facebook abierto?');
+    setBusy(false);
   }
 
   async function removeInstance(deviceId) {
@@ -351,8 +405,13 @@
   }
 
   async function sendCommand(command, target) {
+    if (busy && command === 'screenshot') return;
     if (command === 'status' && target !== 'all') {
       await showStatus(target);
+      return;
+    }
+    if (command === 'viewshot' && target !== 'all') {
+      await viewLastScreenshot(target);
       return;
     }
     if (command === 'screenshot' && target !== 'all') {
@@ -367,7 +426,14 @@
       await apiPost('/api/fleet/command', { command, deviceId: target, target });
       const label = target === 'all' ? 'all instances' : 'instance';
       toast(`${command} → ${label}`);
-      setTimeout(refresh, 800);
+      if (command === 'stop' || command === 'resume') {
+        setTimeout(async () => {
+          await refresh();
+          if (modalDeviceId && modalDeviceId === target) await showStatus(target);
+        }, 1200);
+      } else {
+        setTimeout(refresh, 800);
+      }
     } catch (e) {
       toast(e.status === 401 ? 'Unauthorized' : 'Command failed');
     }
@@ -376,11 +442,16 @@
   function bindActions() {
     document.body.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-cmd]');
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       e.preventDefault();
+      e.stopPropagation();
       const cmd = btn.getAttribute('data-cmd');
       const target = btn.getAttribute('data-target') || 'all';
-      sendCommand(cmd, target);
+      sendCommand(cmd, target).catch((err) => {
+        console.error('[fleet]', err);
+        toast('Error — try again');
+        setBusy(false);
+      });
     });
     document.getElementById('btnRefresh')?.addEventListener('click', () => {
       refresh();

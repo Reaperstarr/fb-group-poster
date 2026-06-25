@@ -1,5 +1,5 @@
 /* Irishka Fleet — minimal service worker for installable PWA */
-const CACHE = 'irishka-fleet-v1';
+const CACHE = 'irishka-fleet-v2';
 const SHELL = [
   '/fleet/panel.html',
   '/fleet/panel.css',
