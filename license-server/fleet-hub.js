@@ -239,6 +239,35 @@ function tgRequest(method, body) {
   });
 }
 
+function formatPauseReasonLabel(stopReason) {
+  const r = String(stopReason || '').trim();
+  if (r === 'post_failure_pause') return 'Fallo al publicar';
+  if (r === 'user_pause') return 'Pausada manualmente';
+  if (r === 'daily_limit') return 'Límite diario';
+  return r || 'Pausada';
+}
+
+async function sendTelegramMessage(chatId, text) {
+  if (!BOT_TOKEN || !chatId || !text) return;
+  return tgRequest('sendMessage', {
+    chat_id: chatId,
+    text: String(text).slice(0, 4000),
+    disable_web_page_preview: true,
+  });
+}
+
+async function notifyIrishkaPausedOnServer(instanceName, stopReason, progress) {
+  const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
+  if (!chatId) return;
+  const p = progress || {};
+  const reason = formatPauseReasonLabel(stopReason);
+  const line =
+    `⏸ [${safeInstanceName(instanceName)}] pausada\n` +
+    `${reason}\n` +
+    `Progreso: ${Number(p.done) || 0}/${Number(p.total) || 0} (${Number(p.ok) || 0} ok)`;
+  await sendTelegramMessage(chatId, line);
+}
+
 async function sendTelegramPhoto(chatId, photoBase64, caption) {
   if (!BOT_TOKEN || !chatId || !photoBase64) return;
   const b64 = String(photoBase64).replace(/^data:image\/\w+;base64,/, '');
@@ -361,6 +390,8 @@ async function handleHeartbeat(req, res) {
     if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
     const instanceName = safeInstanceName(body.instanceName);
     const prev = store.instances[deviceId] || {};
+    const prevState = String(prev.state || '').trim()
+      || (prev.posterRunning ? 'posting' : (prev.hasRunState ? 'paused' : 'idle'));
     const state = resolveState(body);
     store.instances[deviceId] = {
       deviceId,
@@ -384,6 +415,9 @@ async function handleHeartbeat(req, res) {
       facebookTabCount: Number(body.facebookTabCount) || 0,
       facebookReason: String(body.facebookReason || '').slice(0, 120),
     };
+    if (prevState === 'posting' && state === 'paused') {
+      notifyIrishkaPausedOnServer(instanceName, body.stopReason, body.progress).catch(() => {});
+    }
     saveFleetStore();
     const commands = drainCommandsForDevice(deviceId, 5);
     return fleetJson(res, 200, { ok: true, state, commands });

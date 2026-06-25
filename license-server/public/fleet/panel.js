@@ -12,6 +12,9 @@
   let modalDeviceId = '';
   let busy = false;
   let lastScreenshotObjectUrl = null;
+  const instanceStates = new Map();
+  let pauseStatesSeeded = false;
+  let pauseNotifyAsked = false;
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -98,6 +101,101 @@
   function setSummaryLine(text) {
     const el = document.getElementById('summaryLine');
     if (el) el.textContent = text;
+  }
+
+  function pauseNotifyBody(inst) {
+    const r = String(inst.stopReason || '');
+    if (r === 'post_failure_pause') return 'Fallo al publicar — revisa en Irishka';
+    if (r === 'user_pause') return 'Pausada manualmente';
+    if (r === 'daily_limit') return 'Límite diario alcanzado';
+    const p = inst.progress || {};
+    return `Progreso: ${p.done || 0}/${p.total || 0} (${p.ok || 0} ok)`;
+  }
+
+  async function ensurePauseNotifyPermission() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied' || pauseNotifyAsked) return false;
+    pauseNotifyAsked = true;
+    try {
+      const r = await Notification.requestPermission();
+      return r === 'granted';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function syncFleetAuthToServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sw = reg.active || reg.waiting;
+      if (!sw) return;
+      sw.postMessage({
+        type: 'fleet-auth',
+        fleetKey: fleetKey || '',
+        initData: initData || '',
+      });
+    } catch (_) {}
+  }
+
+  function notifyInstancePaused(inst) {
+    const name = inst.instanceName || 'Irishka';
+    const title = `${name} pausada`;
+    const body = pauseNotifyBody(inst);
+    const tag = `pause-${inst.deviceId}`;
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(title, {
+          body,
+          icon: '/fleet/icon-192.png',
+          tag,
+          renotify: true,
+        });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
+      } catch (_) {}
+    }
+
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'irishka-pause',
+        title,
+        body,
+        tag,
+      });
+    }
+
+    if (tg && typeof tg.HapticFeedback?.notificationOccurred === 'function') {
+      try {
+        tg.HapticFeedback.notificationOccurred('warning');
+      } catch (_) {}
+    }
+
+    toast(`⏸ ${title}`);
+  }
+
+  function detectPauseTransitions(instances) {
+    if (!Array.isArray(instances)) return;
+    if (!pauseStatesSeeded) {
+      instances.forEach((inst) => {
+        if (inst?.deviceId) instanceStates.set(inst.deviceId, inst.state || 'idle');
+      });
+      pauseStatesSeeded = true;
+      return;
+    }
+    instances.forEach((inst) => {
+      if (!inst?.deviceId) return;
+      const prev = instanceStates.get(inst.deviceId);
+      const cur = inst.state || 'idle';
+      if (cur === 'paused' && prev === 'posting') {
+        notifyInstancePaused(inst);
+      }
+      instanceStates.set(inst.deviceId, cur);
+    });
   }
 
   function pct(done, total) {
@@ -275,6 +373,9 @@
       hideAuthGate();
       renderSummary(data.summary || { total: 0, posting: 0, paused: 0, idle: 0, offline: 0 });
       renderInstances(data.instances || []);
+      detectPauseTransitions(data.instances || []);
+      void syncFleetAuthToServiceWorker();
+      void ensurePauseNotifyPermission();
       document.getElementById('lastSync').textContent = `Updated ${new Date().toLocaleTimeString()}`;
       return data;
     } catch (e) {
@@ -570,6 +671,8 @@
       }
       saveFleetKey(key);
       await refresh();
+      void syncFleetAuthToServiceWorker();
+      void ensurePauseNotifyPermission();
       if (!refreshTimer) refreshTimer = setInterval(refresh, 12000);
     });
     document.getElementById('modalClose')?.addEventListener('click', closeModal);
@@ -607,9 +710,13 @@
     }
   }
 
-  function registerServiceWorker() {
+  async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/fleet/sw.js', { scope: '/fleet/' }).catch(() => {});
+    try {
+      const reg = await navigator.serviceWorker.register('/fleet/sw.js', { scope: '/fleet/' });
+      await reg.update();
+      await syncFleetAuthToServiceWorker();
+    } catch (_) {}
   }
 
   async function init() {
@@ -636,6 +743,8 @@
     if (input && fleetKey) input.value = fleetKey;
 
     await refresh();
+    void syncFleetAuthToServiceWorker();
+    void ensurePauseNotifyPermission();
     refreshTimer = setInterval(refresh, 12000);
   }
 
