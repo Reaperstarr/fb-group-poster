@@ -11,6 +11,7 @@
   let instancesCache = [];
   let modalDeviceId = '';
   let busy = false;
+  let lastScreenshotObjectUrl = null;
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -116,12 +117,20 @@
     document.body.style.overflow = 'hidden';
   }
 
+  function revokeScreenshotObjectUrl() {
+    if (lastScreenshotObjectUrl) {
+      URL.revokeObjectURL(lastScreenshotObjectUrl);
+      lastScreenshotObjectUrl = null;
+    }
+  }
+
   function closeModal() {
     const modal = document.getElementById('fleetModal');
     if (!modal) return;
     modal.hidden = true;
     modalDeviceId = '';
     document.body.style.overflow = '';
+    revokeScreenshotObjectUrl();
   }
 
   function modalActionsHtml(deviceId, inst) {
@@ -302,14 +311,100 @@
     openModal(`${inst.instanceName || 'Irishka'} — Status`, statusHtml(inst) + modalActionsHtml(deviceId, inst), deviceId);
   }
 
-  async function showScreenshotModal(deviceId, name, shot) {
+  async function fetchScreenshotPayload(deviceId) {
+    const imgUrl = `${API_BASE}/api/fleet/screenshot/img?deviceId=${encodeURIComponent(deviceId)}`;
+    try {
+      const res = await fetch(imgUrl, { headers: headers(), cache: 'no-store' });
+      if (res.ok) {
+        const ct = String(res.headers.get('content-type') || '');
+        if (ct.includes('image')) {
+          const blob = await res.blob();
+          if (blob && blob.size > 0) {
+            revokeScreenshotObjectUrl();
+            lastScreenshotObjectUrl = URL.createObjectURL(blob);
+            return {
+              capturedAt: res.headers.get('X-Captured-At') || null,
+              imageSrc: lastScreenshotObjectUrl,
+            };
+          }
+        }
+      }
+    } catch (_) {}
+
+    const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
+    if (shot.ok && shot.imageBase64) {
+      const b64 = String(shot.imageBase64).replace(/^data:image\/\w+;base64,/, '');
+      return {
+        capturedAt: shot.capturedAt || null,
+        imageSrc: `data:image/jpeg;base64,${b64}`,
+      };
+    }
+    return null;
+  }
+
+  function showScreenshotModal(deviceId, name, payload) {
+    const when = payload.capturedAt
+      ? new Date(payload.capturedAt).toLocaleString()
+      : 'Now';
     openModal(
       `${name} — Screenshot`,
-      `<p style="color:var(--muted);margin:0 0 8px">${shot.capturedAt ? new Date(shot.capturedAt).toLocaleString() : 'Now'}</p>` +
-      `<img class="modal__shot" src="data:image/jpeg;base64,${shot.imageBase64}" alt="Screenshot">` +
+      `<p style="color:var(--muted);margin:0 0 8px">${escapeHtml(when)}</p>` +
+      `<img class="modal__shot" src="${payload.imageSrc}" alt="Screenshot">` +
       modalActionsHtml(deviceId, { hasScreenshot: true }),
       deviceId
     );
+  }
+
+  async function presentScreenshot(deviceId, name) {
+    const payload = await fetchScreenshotPayload(deviceId);
+    if (!payload) return false;
+    showScreenshotModal(deviceId, name, payload);
+    return true;
+  }
+
+  async function waitAndShowScreenshot(deviceId, name, opts) {
+    const beforeAt = String(opts?.beforeAt || '');
+    const maxAttempts = opts?.maxAttempts || 24;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 700 : 1500));
+      try {
+        if (await presentScreenshot(deviceId, name)) {
+          await refresh();
+          return true;
+        }
+      } catch (e) {
+        if (e.status && e.status !== 404) {
+          // keep polling on transient errors
+        }
+      }
+      const data = await refresh();
+      const inst = (data?.instances || []).find((x) => x.deviceId === deviceId);
+      const lr = inst?.lastCommandResult;
+      if (lr?.command === 'screenshot' && lr.at && lr.ok === false) {
+        const msg = lr.message || 'Screenshot failed';
+        toast(/dragging a tab|cannot be edited/i.test(msg)
+          ? 'Chrome bloqueó el cambio de pestaña — suelta la pestaña, haz clic en Facebook y reintenta'
+          : msg);
+        return false;
+      }
+      if (inst?.hasScreenshot && inst.lastScreenshotAt && inst.lastScreenshotAt !== beforeAt) {
+        try {
+          if (await presentScreenshot(deviceId, name)) {
+            await refresh();
+            return true;
+          }
+        } catch (_) {}
+      }
+      if (lr?.command === 'screenshot' && lr.at && lr.ok) {
+        try {
+          if (await presentScreenshot(deviceId, name)) {
+            await refresh();
+            return true;
+          }
+        } catch (_) {}
+      }
+    }
+    return false;
   }
 
   async function viewLastScreenshot(deviceId) {
@@ -317,11 +412,7 @@
     const name = inst?.instanceName || 'Irishka';
     setBusy(true, `Cargando captura de ${name}…`);
     try {
-      const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
-      if (shot.ok && shot.imageBase64) {
-        await showScreenshotModal(deviceId, name, shot);
-        return;
-      }
+      if (await presentScreenshot(deviceId, name)) return;
       toast('No hay captura guardada');
     } catch (e) {
       toast(e.status === 404 ? 'No hay captura guardada' : 'No se pudo cargar la captura');
@@ -334,9 +425,9 @@
     if (busy) return;
     const inst = findInstance(deviceId);
     const name = inst?.instanceName || 'Irishka';
+    const beforeAt = inst?.lastScreenshotAt || '';
     setBusy(true, `📸 Capturando ${name}…`);
     toast(`📸 Capturando ${name}…`);
-    const before = inst?.lastScreenshotAt || '';
     try {
       await apiPost('/api/fleet/command', { command: 'screenshot', deviceId, target: deviceId });
     } catch (e) {
@@ -344,49 +435,18 @@
       setBusy(false);
       return;
     }
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, i === 0 ? 800 : 2000));
-      try {
-        const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
-        if (shot.ok && shot.imageBase64) {
-          await showScreenshotModal(deviceId, name, shot);
-          await refresh();
-          setBusy(false);
-          return;
-        }
-      } catch (e) {
-        if (e.status !== 404) break;
-      }
+    const opened = await waitAndShowScreenshot(deviceId, name, { beforeAt });
+    if (!opened) {
       const data = await refresh();
-      const updated = (data?.instances || []).find((x) => x.deviceId === deviceId);
-      const lr = updated?.lastCommandResult;
-      if (lr?.command === 'screenshot' && lr.at && lr.ok === false) {
-        toast(lr.message || 'Screenshot failed');
-        setBusy(false);
-        return;
-      }
-      if (updated?.lastScreenshotAt && updated.lastScreenshotAt !== before) {
-        try {
-          const shot = await apiGet(`/api/fleet/screenshot?deviceId=${encodeURIComponent(deviceId)}`);
-          if (shot.ok && shot.imageBase64) {
-            await showScreenshotModal(deviceId, name, shot);
-            await refresh();
-            setBusy(false);
-            return;
-          }
-        } catch (_) {}
-        break;
+      const lr = (data?.instances || []).find((x) => x.deviceId === deviceId)?.lastCommandResult;
+      if (lr?.command === 'screenshot' && lr.ok) {
+        toast('Captura guardada — abre Status y pulsa 🖼 Ver captura');
+      } else if (lr?.message) {
+        toast(lr.message);
+      } else {
+        toast('No se pudo mostrar la captura — reintenta');
       }
     }
-    const data = await refresh();
-    const updated = (data?.instances || []).find((x) => x.deviceId === deviceId);
-    const lr = updated?.lastCommandResult;
-    if (lr?.command === 'screenshot' && lr.message) {
-      toast(lr.ok ? 'Screenshot sent — reload panel' : lr.message);
-      setBusy(false);
-      return;
-    }
-    toast('Timeout — ¿PC online con Facebook abierto?');
     setBusy(false);
   }
 

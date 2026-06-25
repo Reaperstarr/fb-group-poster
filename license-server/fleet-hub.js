@@ -462,11 +462,12 @@ async function handleScreenshot(req, res) {
       });
     }
     const inst = store.instances[deviceId];
-    if (inst) {
-      inst.lastScreenshotAt = new Date().toISOString();
-      inst.lastScreenshotB64 = b64;
-      saveFleetStore();
+    if (!inst) {
+      return fleetJson(res, 404, { ok: false, message: 'Unknown deviceId — run heartbeat first' });
     }
+    inst.lastScreenshotAt = new Date().toISOString();
+    inst.lastScreenshotB64 = b64;
+    saveFleetStore();
     const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
     if (chatId && BOT_TOKEN) {
       await sendTelegramPhoto(chatId, b64, `[${safeInstanceName(inst?.instanceName)}] screenshot`);
@@ -490,6 +491,23 @@ async function handleGetScreenshot(req, res, url) {
     capturedAt: inst.lastScreenshotAt || null,
     imageBase64: inst.lastScreenshotB64,
   });
+}
+
+async function handleGetScreenshotImage(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
+  if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
+  const inst = store.instances[deviceId];
+  if (!inst?.lastScreenshotB64) return fleetJson(res, 404, { ok: false, message: 'No screenshot' });
+  const buf = Buffer.from(inst.lastScreenshotB64, 'base64');
+  res.writeHead(200, {
+    'Content-Type': 'image/jpeg',
+    'Content-Length': buf.length,
+    'X-Captured-At': inst.lastScreenshotAt || '',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+  });
+  res.end(buf);
 }
 
 async function handleRemove(req, res, url) {
@@ -557,6 +575,10 @@ async function handleFleetRequest(req, res, urlPath, url) {
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/screenshot') {
     await handleScreenshot(req, res);
+    return true;
+  }
+  if (req.method === 'GET' && urlPath === '/api/fleet/screenshot/img') {
+    await handleGetScreenshotImage(req, res, url);
     return true;
   }
   if (req.method === 'GET' && urlPath === '/api/fleet/screenshot') {
