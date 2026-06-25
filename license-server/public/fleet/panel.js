@@ -89,13 +89,29 @@
     toast._t = setTimeout(() => { el.hidden = true; }, 4500);
   }
 
-  function setBusy(on, msg) {
+  function isModalOpen() {
+    const modal = document.getElementById('fleetModal');
+    return !!(modal && !modal.hidden);
+  }
+
+  function setBusy(on, msg, opts) {
     busy = !!on;
+    const fromModal = !!opts?.fromModal;
     const el = document.getElementById('busyOverlay');
     const text = document.getElementById('busyText');
-    if (el) el.hidden = !on;
+    if (el) el.hidden = !on || (fromModal && isModalOpen());
     if (text && msg) text.textContent = msg;
-    document.querySelectorAll('[data-cmd]').forEach((b) => { b.disabled = on; });
+    document.querySelectorAll('.card__actions [data-cmd], .toolbar [data-cmd]').forEach((b) => {
+      b.disabled = on;
+    });
+  }
+
+  function setModalShotLoading(on) {
+    const bodyEl = document.getElementById('modalBody');
+    const btn = bodyEl?.querySelector('.modal__action[data-cmd="screenshot"]');
+    if (!btn) return;
+    btn.disabled = !!on;
+    btn.textContent = on ? '⏳ Capturando…' : '📸 Capturar pantalla';
   }
 
   function setSummaryLine(text) {
@@ -239,6 +255,7 @@
     return `<div class="modal__actions">
       <button type="button" class="btn btn--ok modal__action modal__action--primary" data-cmd="screenshot" data-target="${id}">📸 Capturar pantalla</button>
       ${lastShot}
+      <button type="button" class="btn btn--ghost modal__action" data-cmd="consolidate_fb" data-target="${id}">🧹 Cerrar FB duplicadas</button>
       <button type="button" class="btn btn--warn modal__action" data-cmd="stop" data-target="${id}">⏸ Pausar</button>
       <button type="button" class="btn btn--ghost modal__action" data-cmd="resume" data-target="${id}">▶ Reanudar</button>
     </div>`;
@@ -249,10 +266,14 @@
     const fbLine = inst.facebookConnected
       ? (inst.facebookUserName || 'Connected')
       : (inst.facebookReason || 'Not connected');
+    const fbTabs = Number(inst.facebookTabCount) || 0;
+    const fbTabsLabel = fbTabs > 1
+      ? `⚠️ ${fbTabs} abiertas — se cierran duplicadas al capturar`
+      : String(fbTabs);
     const rows = [
       ['State', STATE_LABEL[inst.state] || inst.state],
       ['Facebook', inst.facebookConnected ? `✓ ${fbLine}` : `✗ ${fbLine}`],
-      ['FB tabs open', String(inst.facebookTabCount || 0)],
+      ['FB tabs open', fbTabsLabel],
       ['Progress', `${p.done || 0}/${p.total || 0} (${p.ok || 0} ok)`],
       ['Current group', p.currentGroup || '—'],
       ['Extension', inst.extensionVersion || '—'],
@@ -301,30 +322,42 @@
       const total = p.total || 0;
       const ok = p.ok || 0;
       const bar = pct(done, total);
+      const id = escapeAttr(inst.deviceId);
+      const name = escapeHtml(inst.instanceName || 'Irishka');
+      const fbTabs = Number(inst.facebookTabCount) || 0;
+      const fbTitle = inst.facebookConnected
+        ? (inst.facebookUserName || 'Facebook OK')
+        : (inst.facebookReason || 'Facebook offline');
+      const fbClass = inst.facebookConnected ? 'card__fb-dot--ok' : 'card__fb-dot--bad';
       const meta = st === 'offline'
-        ? `Last seen ${formatAgo(inst.offlineSinceMs)}`
-        : `${done}/${total} groups · ${ok} ok`;
-      const fbBadge = inst.facebookConnected
-        ? `<div class="card__fb card__fb--ok">📘 ${escapeHtml(inst.facebookUserName || 'Facebook OK')}</div>`
-        : `<div class="card__fb card__fb--bad">📘 ${escapeHtml(inst.facebookReason || 'Facebook offline')}</div>`;
-      const group = p.currentGroup ? `<div class="card__group">📍 ${escapeHtml(p.currentGroup)}</div>` : '';
+        ? formatAgo(inst.offlineSinceMs)
+        : (total > 0 ? `${done}/${total} · ${ok}ok` : '—');
+      const groupTip = p.currentGroup ? escapeAttr(p.currentGroup) : '';
+      const groupMark = p.currentGroup ? `<span class="card__pin" title="${groupTip}">📍</span>` : '';
+      const progress = total > 0
+        ? `<div class="progress progress--thin"><div class="progress__bar" style="width:${bar}%"></div></div>`
+        : '';
       return `
-        <article class="card" data-id="${escapeAttr(inst.deviceId)}">
-          <div class="card__top">
-            <span class="status-dot status-dot--${st}"></span>
-            <div class="card__title">${STATE_ICON[st] || '⚪'} ${escapeHtml(inst.instanceName || 'Irishka')}</div>
-            <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
+        <article class="card card--dense" data-id="${id}">
+          <span class="status-dot status-dot--${st}" title="${STATE_LABEL[st] || st}"></span>
+          <div class="card__main">
+            <div class="card__head">
+              <span class="card__title" title="${name}">${name}</span>
+              <span class="card__badge card__badge--${st}">${STATE_LABEL[st] || st}</span>
+            </div>
+            <div class="card__sub">
+              <span class="card__stat">${meta}</span>
+              ${groupMark}
+              <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
+            </div>
+            ${progress}
           </div>
-          <div class="card__meta">${meta}</div>
-          ${fbBadge}
-          ${group}
-          ${total > 0 ? `<div class="progress"><div class="progress__bar" style="width:${bar}%"></div></div>` : ''}
-          <div class="card__actions">
-            <button type="button" class="btn btn--sm btn--ghost" data-cmd="status" data-target="${escapeAttr(inst.deviceId)}" title="Status">📊</button>
-            <button type="button" class="btn btn--sm btn--warn" data-cmd="stop" data-target="${escapeAttr(inst.deviceId)}" title="Pause">⏸</button>
-            <button type="button" class="btn btn--sm btn--ok" data-cmd="resume" data-target="${escapeAttr(inst.deviceId)}" title="Resume">▶</button>
-            <button type="button" class="btn btn--sm btn--ghost" data-cmd="screenshot" data-target="${escapeAttr(inst.deviceId)}" title="Screenshot">📸</button>
-            <button type="button" class="btn btn--sm btn--danger" data-cmd="remove" data-target="${escapeAttr(inst.deviceId)}" title="Remove">🗑</button>
+          <div class="card__actions card__actions--dense">
+            <button type="button" class="btn btn--icon btn--ghost" data-cmd="status" data-target="${id}" title="Status">📊</button>
+            <button type="button" class="btn btn--icon btn--warn" data-cmd="stop" data-target="${id}" title="Pause">⏸</button>
+            <button type="button" class="btn btn--icon btn--ok" data-cmd="resume" data-target="${id}" title="Resume">▶</button>
+            <button type="button" class="btn btn--icon btn--ghost" data-cmd="screenshot" data-target="${id}" title="Screenshot">📸</button>
+            <button type="button" class="btn btn--icon btn--danger" data-cmd="remove" data-target="${id}" title="Remove">🗑</button>
           </div>
         </article>`;
     }).join('');
@@ -523,32 +556,36 @@
   }
 
   async function requestScreenshot(deviceId) {
-    if (busy) return;
-    const inst = findInstance(deviceId);
+    const id = deviceId || modalDeviceId;
+    if (!id) return;
+    const fromModal = isModalOpen() && modalDeviceId === id;
+    if (busy && !fromModal) return;
+    const inst = findInstance(id);
     const name = inst?.instanceName || 'Irishka';
     const beforeAt = inst?.lastScreenshotAt || '';
-    setBusy(true, `📸 Capturando ${name}…`);
+    setBusy(true, `📸 Capturando ${name}…`, { fromModal });
+    if (fromModal) setModalShotLoading(true);
     toast(`📸 Capturando ${name}…`);
     try {
-      await apiPost('/api/fleet/command', { command: 'screenshot', deviceId, target: deviceId });
+      await apiPost('/api/fleet/command', { command: 'screenshot', deviceId: id, target: id });
+      const opened = await waitAndShowScreenshot(id, name, { beforeAt });
+      if (!opened) {
+        const data = await refresh();
+        const lr = (data?.instances || []).find((x) => x.deviceId === id)?.lastCommandResult;
+        if (lr?.command === 'screenshot' && lr.ok) {
+          toast('Captura guardada — pulsa 🖼 Ver captura');
+        } else if (lr?.message) {
+          toast(lr.message);
+        } else {
+          toast('No se pudo mostrar la captura — reintenta');
+        }
+      }
     } catch (e) {
       toast(e.status === 401 ? 'Unauthorized' : 'Screenshot command failed');
+    } finally {
+      setModalShotLoading(false);
       setBusy(false);
-      return;
     }
-    const opened = await waitAndShowScreenshot(deviceId, name, { beforeAt });
-    if (!opened) {
-      const data = await refresh();
-      const lr = (data?.instances || []).find((x) => x.deviceId === deviceId)?.lastCommandResult;
-      if (lr?.command === 'screenshot' && lr.ok) {
-        toast('Captura guardada — abre Status y pulsa 🖼 Ver captura');
-      } else if (lr?.message) {
-        toast(lr.message);
-      } else {
-        toast('No se pudo mostrar la captura — reintenta');
-      }
-    }
-    setBusy(false);
   }
 
   async function removeInstance(deviceId) {
@@ -581,7 +618,7 @@
   }
 
   async function sendCommand(command, target) {
-    if (busy && command === 'screenshot') return;
+    if (busy && command === 'screenshot' && !(isModalOpen() && modalDeviceId === target)) return;
     if (command === 'status' && target !== 'all') {
       await showStatus(target);
       return;
@@ -598,10 +635,11 @@
       await removeInstance(target);
       return;
     }
-    if ((command === 'stop' || command === 'resume') && target !== 'all') {
+    if ((command === 'stop' || command === 'resume' || command === 'consolidate_fb' || command === 'cleanfb') && target !== 'all') {
       const inst = findInstance(target);
       const name = inst?.instanceName || 'Irishka';
-      setBusy(true, command === 'stop' ? `⏸ Pausando ${name}…` : `▶ Reanudando ${name}…`);
+      const labels = { stop: '⏸ Pausando', resume: '▶ Reanudando', consolidate_fb: '🧹 Limpiando FB', cleanfb: '🧹 Limpiando FB' };
+      setBusy(true, `${labels[command] || command} ${name}…`);
       try {
         await apiPost('/api/fleet/command', { command, deviceId: target, target });
         const lr = await waitForCommandResult(target, command, 30000);
