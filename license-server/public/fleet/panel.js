@@ -404,6 +404,21 @@
     }
   }
 
+  async function waitForCommandResult(deviceId, command, timeoutMs) {
+    const before = findInstance(deviceId)?.lastCommandResult?.at || '';
+    const max = Math.ceil((timeoutMs || 25000) / 2000);
+    for (let i = 0; i < max; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 1200 : 2000));
+      const data = await refresh();
+      const inst = (data?.instances || []).find((x) => x.deviceId === deviceId);
+      const lr = inst?.lastCommandResult;
+      if (lr?.command === command && lr.at && lr.at !== before) {
+        return lr;
+      }
+    }
+    return null;
+  }
+
   async function sendCommand(command, target) {
     if (busy && command === 'screenshot') return;
     if (command === 'status' && target !== 'all') {
@@ -420,6 +435,24 @@
     }
     if (command === 'remove' && target !== 'all') {
       await removeInstance(target);
+      return;
+    }
+    if ((command === 'stop' || command === 'resume') && target !== 'all') {
+      const inst = findInstance(target);
+      const name = inst?.instanceName || 'Irishka';
+      setBusy(true, command === 'stop' ? `⏸ Pausando ${name}…` : `▶ Reanudando ${name}…`);
+      try {
+        await apiPost('/api/fleet/command', { command, deviceId: target, target });
+        const lr = await waitForCommandResult(target, command, 30000);
+        if (lr?.message) toast(lr.ok ? lr.message : lr.message);
+        else toast(`${command} enviado — esperando respuesta…`);
+        if (modalDeviceId === target) await showStatus(target);
+        else await refresh();
+      } catch (e) {
+        toast(e.status === 401 ? 'Unauthorized' : 'Command failed');
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     try {

@@ -157,6 +157,15 @@ function enqueueCommand(deviceId, command, meta) {
   return item;
 }
 
+function drainCommandsForDevice(deviceId, max) {
+  const limit = Math.max(1, Math.min(Number(max) || 5, 10));
+  const q = store.queues[deviceId] || [];
+  if (!q.length) return [];
+  const out = q.splice(0, limit);
+  saveFleetStore();
+  return out;
+}
+
 function enqueueAll(command, meta) {
   const ids = Object.keys(store.instances);
   ids.forEach((id) => enqueueCommand(id, command, meta));
@@ -376,7 +385,8 @@ async function handleHeartbeat(req, res) {
       facebookReason: String(body.facebookReason || '').slice(0, 120),
     };
     saveFleetStore();
-    return fleetJson(res, 200, { ok: true, state });
+    const commands = drainCommandsForDevice(deviceId, 5);
+    return fleetJson(res, 200, { ok: true, state, commands });
   } catch (e) {
     return fleetJson(res, 500, { ok: false, message: e.message });
   }
