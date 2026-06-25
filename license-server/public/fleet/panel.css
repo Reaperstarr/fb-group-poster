@@ -458,8 +458,17 @@ html, body {
   justify-content: center;
 }
 .modal__action--primary {
-  font-size: 14px;
-  padding: 11px 14px;
+  font-size: 15px;
+  padding: 14px 16px;
+  min-height: 48px;
+}
+
+@media (max-width: 559px) {
+  .modal__action {
+    min-height: 48px;
+    font-size: 14px;
+    padding: 12px 14px;
+  }
 }
 .modal__shot {
   width: 100%;
