@@ -9,6 +9,7 @@ DIST="${ROOT}/irishka/dist"
 OUT_ZIP="${DIST}/COMMUNITY.zip"
 OUT_DIR="${DIST}/COMMUNITY"
 PKG="COMMUNITY"
+PUBLISH_TO_SERVER="${PUBLISH_TO_SERVER:-0}"
 
 if [[ ! -f "${COMMUNITY_SRC}/manifest.json" ]]; then
   echo "Missing ${COMMUNITY_SRC}/manifest.json — set COMMUNITY_SRC" >&2
@@ -30,16 +31,21 @@ cp "${COMMUNITY_SRC}/app.html" "${COMMUNITY_SRC}/popup.html" "${COMMUNITY_SRC}/l
 cp "${COMMUNITY_SRC}/icons/"*.png "$STAGE/$PKG/icons/"
 cp -a "${COMMUNITY_SRC}/src/." "$STAGE/$PKG/src/"
 
-mkdir -p "$DIST" "$PUBLIC_DIR"
+mkdir -p "$DIST"
 rm -f "$OUT_ZIP"
 (cd "$STAGE" && zip -qr "$OUT_ZIP" "$PKG")
 rm -rf "$OUT_DIR"
 cp -a "$STAGE/$PKG" "$OUT_DIR"
-cp -f "$OUT_ZIP" "${PUBLIC_DIR}/COMMUNITY.zip"
 
-cat > "${PUBLIC_DIR}/version.json" <<EOF
+if [[ "$PUBLISH_TO_SERVER" == "1" ]]; then
+  mkdir -p "$PUBLIC_DIR"
+  cp -f "$OUT_ZIP" "${PUBLIC_DIR}/COMMUNITY.zip"
+  cat > "${PUBLIC_DIR}/version.json" <<EOF
 {"version":"${VER}","package":"COMMUNITY","updatedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 EOF
+  echo "Published ${PUBLIC_DIR}/COMMUNITY.zip (server deploy only)"
+fi
 
 echo "Created ${OUT_ZIP} (v${VER})"
-echo "Published ${PUBLIC_DIR}/COMMUNITY.zip + version.json"
+echo "Folder: ${OUT_DIR}/"
+echo "Distribución manual: copiá COMMUNITY/ o el zip por AnyDesk/USB."

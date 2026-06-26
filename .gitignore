@@ -5,3 +5,23 @@ node_modules/
 license-server/node_modules/
 license-server/licenses.json
 .cursor/
+
+# Manatal Job Publisher (Chrome) — redundante con manatal-extension/.gitignore; deja claro el monorepo
+manatal-extension/node_modules/
+manatal-extension/.env
+manatal-extension/.env.*
+!manatal-extension/.env.example
+manatal-extension/test-results/
+manatal-extension/playwright-report/
+manatal-extension/playwright/.cache/
+manatal-extension/*.log
+
+manatal-cv-mirror/node_modules/
+manatal-cv-mirror/.env
+manatal-cv-mirror/.env.*
+!manatal-cv-mirror/.env.example
+
+# Irishka — zips de release en dist (opcional)
+irishka/dist/*.zip
+# Community privada — no commitear (distribución manual / AnyDesk / USB)
+license-server/public/community/COMMUNITY.zip
