@@ -6,6 +6,12 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const {
+  analyzeScreenshot,
+  shouldAutoAct,
+  visionEnabled,
+  minConfidence,
+} = require('./fleet-vision-guard');
 
 const FLEET_STORE_FILE = process.env.FLEET_STORE_FILE
   ? path.resolve(process.env.FLEET_STORE_FILE)
@@ -247,6 +253,91 @@ function formatPauseReasonLabel(stopReason) {
   return r || 'Pausada';
 }
 
+const VISION_SKIP_STOP_REASONS = new Set(['user_pause', 'daily_limit']);
+
+function shouldRunVisionGuard(stopReason) {
+  if (!visionEnabled()) return false;
+  const r = String(stopReason || '').trim();
+  if (!r || VISION_SKIP_STOP_REASONS.has(r)) return false;
+  return true;
+}
+
+function queueHasPendingCommand(deviceId, command) {
+  const q = store.queues[deviceId] || [];
+  return q.some((item) => String(item.command || '').toLowerCase() === command);
+}
+
+function scheduleVisionGuardScreenshot(deviceId, stopReason, progress, extensionVersion) {
+  if (!shouldRunVisionGuard(stopReason)) return;
+  const inst = store.instances[deviceId];
+  if (!inst) return;
+  inst.visionGuardPending = true;
+  inst.visionGuardStopReason = stopReason;
+  inst.visionGuardProgress = progress || null;
+  inst.visionGuardRequestedAt = new Date().toISOString();
+  // v1.2.0+ extensions auto-upload screenshot on pause; older builds need Fleet command.
+  const ver = String(extensionVersion || '0');
+  const autoUpload = ver >= '1.2.0';
+  if (autoUpload || queueHasPendingCommand(deviceId, 'screenshot')) return;
+  enqueueCommand(deviceId, 'screenshot', { source: 'vision_guard', visionGuard: true });
+}
+
+async function actOnVisionGuardAnalysis(deviceId, inst, analysisResult, imageBase64) {
+  const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
+  const name = safeInstanceName(inst?.instanceName);
+  const analysis = analysisResult?.analysis;
+  const now = new Date().toISOString();
+
+  inst.visionGuardPending = false;
+  inst.lastVisionAnalysisAt = now;
+  inst.lastVisionAnalysis = analysis || null;
+
+  if (!analysis) {
+    if (chatId && imageBase64) {
+      await sendTelegramPhoto(
+        chatId,
+        imageBase64,
+        `⚠️ [${name}] Vision Guard — análisis fallido\nQueda en pausa. Revisá manualmente.`
+      );
+    }
+    return;
+  }
+
+  const confPct = Math.round(analysis.confidence * 100);
+  const autoAct = shouldAutoAct(analysis);
+  const header =
+    analysis.action === 'stop'
+      ? `🛑 [${name}] CRÍTICO — queda en pausa`
+      : autoAct
+        ? `▶️ [${name}] OK — auto-resume`
+        : `❓ [${name}] incierto — queda en pausa`;
+
+  const caption =
+    `${header}\n` +
+    `Categoría: ${analysis.category}\n` +
+    `${analysis.summary || '—'}\n` +
+    `Confianza: ${confPct}%` +
+    (analysis.visibleText ? `\nTexto: ${analysis.visibleText.slice(0, 120)}` : '');
+
+  if (chatId && imageBase64) {
+    await sendTelegramPhoto(chatId, imageBase64, caption.slice(0, 1020));
+  } else if (chatId) {
+    await sendTelegramMessage(chatId, caption);
+  }
+
+  if (!autoAct) return;
+
+  if (analysis.action === 'resume') {
+    if (!queueHasPendingCommand(deviceId, 'resume')) {
+      enqueueCommand(deviceId, 'resume', {
+        source: 'vision_guard',
+        category: analysis.category,
+      });
+    }
+  }
+  // action stop → stay paused, human decides (Fleet play when ready)
+}
+
 async function sendTelegramMessage(chatId, text) {
   if (!BOT_TOKEN || !chatId || !text) return;
   return tgRequest('sendMessage', {
@@ -417,6 +508,7 @@ async function handleHeartbeat(req, res) {
     };
     if (prevState === 'posting' && state === 'paused') {
       notifyIrishkaPausedOnServer(instanceName, body.stopReason, body.progress).catch(() => {});
+      scheduleVisionGuardScreenshot(deviceId, body.stopReason, body.progress, body.extensionVersion);
     }
     saveFleetStore();
     const commands = drainCommandsForDevice(deviceId, 5);
@@ -447,7 +539,7 @@ async function handleCommand(req, res, url) {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
     const target = String(body.deviceId || body.target || 'all');
-    if (!['stop', 'resume', 'screenshot', 'status'].includes(command)) {
+    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb'].includes(command)) {
       return fleetJson(res, 400, { ok: false, message: 'Invalid command' });
     }
     if (target === 'all') {
@@ -501,8 +593,33 @@ async function handleScreenshot(req, res) {
     }
     inst.lastScreenshotAt = new Date().toISOString();
     inst.lastScreenshotB64 = b64;
+    const pauseContext = body.pauseContext && typeof body.pauseContext === 'object' ? body.pauseContext : null;
+    const isVisionGuard = !!body.visionGuard || !!inst.visionGuardPending;
+    if (isVisionGuard) {
+      inst.lastVisionScreenshotAt = inst.lastScreenshotAt;
+      if (pauseContext) inst.visionGuardPauseContext = pauseContext;
+    }
     saveFleetStore();
+
     const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
+    if (isVisionGuard && visionEnabled()) {
+      const context = {
+        stopReason: pauseContext?.stopReason || inst.visionGuardStopReason || inst.stopReason || '',
+        currentGroup: pauseContext?.groupName || inst.progress?.currentGroup || '',
+        lastError: pauseContext?.lastError || '',
+        domHint: pauseContext?.domHint || '',
+      };
+      const result = await analyzeScreenshot(b64, context);
+      await actOnVisionGuardAnalysis(deviceId, inst, result, b64);
+      saveFleetStore();
+      return fleetJson(res, 200, {
+        ok: true,
+        vision: true,
+        analysis: result.analysis || null,
+        visionOk: result.ok,
+      });
+    }
+
     if (chatId && BOT_TOKEN) {
       await sendTelegramPhoto(chatId, b64, `[${safeInstanceName(inst?.instanceName)}] screenshot`);
     }
@@ -564,6 +681,8 @@ function handleFleetConfig(req, res) {
     panelUrl: fleetPanelUrl(),
     fleetEnabled: !!FLEET_SECRET,
     botConfigured: !!BOT_TOKEN,
+    visionEnabled: visionEnabled(),
+    visionMinConfidence: minConfidence(),
   });
 }
 
