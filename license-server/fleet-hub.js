@@ -255,8 +255,14 @@ function formatPauseReasonLabel(stopReason) {
 
 const VISION_SKIP_STOP_REASONS = new Set(['user_pause', 'daily_limit']);
 
-function shouldRunVisionGuard(stopReason) {
+function isVisionAutoEnabled(inst) {
+  if (!inst || typeof inst !== 'object') return true;
+  return inst.visionAutoEnabled !== false;
+}
+
+function shouldRunVisionGuard(stopReason, inst) {
   if (!visionEnabled()) return false;
+  if (!isVisionAutoEnabled(inst)) return false;
   const r = String(stopReason || '').trim();
   if (!r || VISION_SKIP_STOP_REASONS.has(r)) return false;
   return true;
@@ -268,9 +274,9 @@ function queueHasPendingCommand(deviceId, command) {
 }
 
 function scheduleVisionGuardScreenshot(deviceId, stopReason, progress, extensionVersion) {
-  if (!shouldRunVisionGuard(stopReason)) return;
   const inst = store.instances[deviceId];
   if (!inst) return;
+  if (!shouldRunVisionGuard(stopReason, inst)) return;
   inst.visionGuardPending = true;
   inst.visionGuardStopReason = stopReason;
   inst.visionGuardProgress = progress || null;
@@ -287,6 +293,11 @@ async function actOnVisionGuardAnalysis(deviceId, inst, analysisResult, imageBas
   const name = safeInstanceName(inst?.instanceName);
   const analysis = analysisResult?.analysis;
   const now = new Date().toISOString();
+
+  if (!isVisionAutoEnabled(inst)) {
+    inst.visionGuardPending = false;
+    return;
+  }
 
   inst.visionGuardPending = false;
   inst.lastVisionAnalysisAt = now;
@@ -529,6 +540,7 @@ async function handleHeartbeat(req, res) {
       || (prev.posterRunning ? 'posting' : (prev.hasRunState ? 'paused' : 'idle'));
     const state = resolveState(body);
     store.instances[deviceId] = {
+      ...prev,
       deviceId,
       instanceName,
       state,
@@ -549,6 +561,7 @@ async function handleHeartbeat(req, res) {
       facebookUserName: String(body.facebookUserName || '').slice(0, 80),
       facebookTabCount: Number(body.facebookTabCount) || 0,
       facebookReason: String(body.facebookReason || '').slice(0, 120),
+      visionAutoEnabled: prev.visionAutoEnabled !== false,
     };
     if (prevState === 'posting' && state === 'paused') {
       notifyIrishkaPausedOnServer(instanceName, body.stopReason, body.progress).catch(() => {});
@@ -556,7 +569,14 @@ async function handleHeartbeat(req, res) {
     }
     saveFleetStore();
     const commands = drainCommandsForDevice(deviceId, 5);
-    return fleetJson(res, 200, { ok: true, state, commands });
+    const inst = store.instances[deviceId];
+    return fleetJson(res, 200, {
+      ok: true,
+      state,
+      commands,
+      visionAutoEnabled: isVisionAutoEnabled(inst),
+      visionGlobalEnabled: visionEnabled(),
+    });
   } catch (e) {
     return fleetJson(res, 500, { ok: false, message: e.message });
   }
@@ -614,7 +634,12 @@ async function handleDashboard(req, res, url) {
     idle: instances.filter((i) => i.state === 'idle').length,
     offline: instances.filter((i) => i.state === 'offline').length,
   };
-  return fleetJson(res, 200, { ok: true, summary, instances });
+  return fleetJson(res, 200, {
+    ok: true,
+    summary,
+    instances,
+    visionGlobalEnabled: visionEnabled(),
+  });
 }
 
 async function handleScreenshot(req, res) {
@@ -646,6 +671,13 @@ async function handleScreenshot(req, res) {
     saveFleetStore();
 
     const chatId = process.env.IRISHKA_FLEET_CHAT_ID || '';
+    if (isVisionGuard) {
+      inst.visionGuardPending = false;
+      if (!visionEnabled() || !isVisionAutoEnabled(inst)) {
+        saveFleetStore();
+        return fleetJson(res, 200, { ok: true, vision: false, visionSkipped: true });
+      }
+    }
     if (isVisionGuard && visionEnabled()) {
       const context = {
         stopReason: pauseContext?.stopReason || inst.visionGuardStopReason || inst.stopReason || '',
@@ -730,6 +762,29 @@ function handleFleetConfig(req, res) {
   });
 }
 
+async function handleInstanceSettings(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  try {
+    const body = await collectJson(req);
+    const deviceId = safeDeviceId(body.deviceId);
+    if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
+    const inst = store.instances[deviceId];
+    if (!inst) return fleetJson(res, 404, { ok: false, message: 'Instance not found' });
+    if (typeof body.visionAutoEnabled === 'boolean') {
+      inst.visionAutoEnabled = body.visionAutoEnabled;
+      if (!body.visionAutoEnabled) inst.visionGuardPending = false;
+      saveFleetStore();
+    }
+    return fleetJson(res, 200, {
+      ok: true,
+      instance: publicInstance(inst),
+      visionGlobalEnabled: visionEnabled(),
+    });
+  } catch (e) {
+    return fleetJson(res, 500, { ok: false, message: e.message });
+  }
+}
+
 function handleValidateInit(req, res) {
   const initData = String(req.headers['x-telegram-init-data'] || '');
   const v = validateTelegramInitData(initData);
@@ -787,6 +842,10 @@ async function handleFleetRequest(req, res, urlPath, url) {
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/remove') {
     await handleRemove(req, res, url);
+    return true;
+  }
+  if (req.method === 'POST' && urlPath === '/api/fleet/instance-settings') {
+    await handleInstanceSettings(req, res, url);
     return true;
   }
   if (req.method === 'GET' && urlPath === '/api/fleet/config') {

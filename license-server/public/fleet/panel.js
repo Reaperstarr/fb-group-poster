@@ -15,6 +15,7 @@
   const instanceStates = new Map();
   let pauseStatesSeeded = false;
   let pauseNotifyAsked = false;
+  let visionGlobalEnabled = true;
 
   const STATE_LABEL = {
     posting: 'Posting',
@@ -267,12 +268,34 @@
     const lastShot = inst?.hasScreenshot
       ? `<button type="button" class="btn btn--ghost modal__action" data-cmd="viewshot" data-target="${id}">🖼 Ver captura</button>`
       : '';
-    return `<div class="modal__actions">
+    return `${visionAutoToggleHtml(inst)}
+    <div class="modal__actions">
       <button type="button" class="btn btn--ok modal__action modal__action--primary" data-cmd="screenshot" data-target="${id}">📸 Capturar pantalla</button>
       ${lastShot}
       <button type="button" class="btn btn--ghost modal__action" data-cmd="consolidate_fb" data-target="${id}">🧹 Cerrar FB duplicadas</button>
       <button type="button" class="btn btn--warn modal__action" data-cmd="stop" data-target="${id}">⏸ Pausar</button>
       <button type="button" class="btn btn--ghost modal__action" data-cmd="resume" data-target="${id}">▶ Reanudar</button>
+    </div>`;
+  }
+
+  function visionAutoToggleHtml(inst) {
+    if (!inst?.deviceId) return '';
+    const id = escapeAttr(inst.deviceId);
+    const checked = inst.visionAutoEnabled !== false ? 'checked' : '';
+    const globalOff = visionGlobalEnabled === false;
+    const disabled = globalOff ? 'disabled' : '';
+    const hint = globalOff
+      ? 'Vision Guard desactivado en el servidor (sin OPENAI_API_KEY o IRISHKA_VISION_ENABLED=false)'
+      : 'Clasifica pausas con IA y auto-resume si no es crítico';
+    return `<div class="modal__settings">
+      <label class="toggle-row" title="${escapeAttr(hint)}">
+        <span class="toggle-row__label">🤖 AI automático</span>
+        <span class="toggle">
+          <input type="checkbox" class="toggle__input" data-vision-toggle="${id}" ${checked} ${disabled}>
+          <span class="toggle__track" aria-hidden="true"></span>
+        </span>
+      </label>
+      <p class="modal__hint">${escapeHtml(hint)}</p>
     </div>`;
   }
 
@@ -297,6 +320,9 @@
     if (inst.stopReason) rows.push(['Stop reason', inst.stopReason]);
     if (inst.lastCommandResult?.message) {
       rows.push(['Last command', inst.lastCommandResult.message]);
+    }
+    if (inst.lastVisionAnalysis?.category) {
+      rows.push(['Last AI', `${inst.lastVisionAnalysis.category} (${Math.round((inst.lastVisionAnalysis.confidence || 0) * 100)}%)`]);
     }
     return rows.map(([k, v]) =>
       `<div class="modal__row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`
@@ -353,6 +379,15 @@
       const progress = total > 0
         ? `<div class="progress progress--thin progress--${tone}"><div class="progress__bar" style="width:${bar}%"></div></div>`
         : '';
+      const aiOn = inst.visionAutoEnabled !== false;
+      const aiDisabled = visionGlobalEnabled === false;
+      const aiTitle = aiDisabled
+        ? 'Vision Guard desactivado en el servidor'
+        : (aiOn ? 'AI automático ON — clasifica pausas y auto-resume' : 'AI automático OFF — solo control manual');
+      const aiToggle = `<label class="card__ai" title="${escapeAttr(aiTitle)}" onclick="event.stopPropagation()">
+        <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
+        <span class="card__ai-label">🤖 AI</span>
+      </label>`;
       return `
         <article class="card card--dense card--tone-${tone}" data-id="${id}" data-tone="${tone}">
           <div class="card__body">
@@ -365,6 +400,7 @@
                 <span class="card__stat">${meta}</span>
                 ${groupMark}
                 <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
+                ${aiToggle}
               </div>
               ${progress}
             </div>
@@ -421,6 +457,7 @@
       const data = await apiGet('/api/fleet/dashboard');
       if (!data.ok) throw new Error('dashboard failed');
       hideAuthGate();
+      visionGlobalEnabled = data.visionGlobalEnabled !== false;
       renderSummary(data.summary || { total: 0, posting: 0, paused: 0, idle: 0, offline: 0 });
       renderInstances(data.instances || []);
       detectPauseTransitions(data.instances || []);
@@ -605,6 +642,21 @@
     }
   }
 
+  async function setVisionAutoEnabled(deviceId, enabled) {
+    const resp = await apiPost('/api/fleet/instance-settings', {
+      deviceId,
+      visionAutoEnabled: !!enabled,
+    });
+    const inst = resp.instance;
+    if (inst) {
+      const idx = instancesCache.findIndex((i) => i.deviceId === deviceId);
+      if (idx >= 0) instancesCache[idx] = { ...instancesCache[idx], ...inst };
+    }
+    if (resp.visionGlobalEnabled === false) visionGlobalEnabled = false;
+    toast(enabled ? '🤖 AI automático ON' : '🤖 AI automático OFF');
+    await refresh();
+  }
+
   async function removeInstance(deviceId) {
     const inst = findInstance(deviceId);
     const name = inst?.instanceName || deviceId;
@@ -689,6 +741,17 @@
   }
 
   function bindActions() {
+    document.body.addEventListener('change', (e) => {
+      const cb = e.target.closest('[data-vision-toggle]');
+      if (!cb || cb.disabled) return;
+      e.stopPropagation();
+      const deviceId = cb.getAttribute('data-vision-toggle');
+      if (!deviceId) return;
+      setVisionAutoEnabled(deviceId, cb.checked).catch(() => {
+        cb.checked = !cb.checked;
+        toast('No se pudo guardar AI automático');
+      });
+    });
     document.body.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-cmd]');
       if (!btn || btn.disabled) return;
