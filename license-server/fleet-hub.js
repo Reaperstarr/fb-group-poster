@@ -445,6 +445,40 @@ function startTelegramPolling() {
   console.log('[fleet-hub] Telegram bot polling started');
 }
 
+function serveCommunityStatic(req, res, urlPath) {
+  if (!urlPath.startsWith('/community')) return false;
+  let rel = urlPath.replace(/^\/community\/?/, '') || 'version.json';
+  if (rel.includes('..')) {
+    res.writeHead(400);
+    res.end('bad path');
+    return true;
+  }
+  const base = path.join(PUBLIC_DIR, 'community');
+  const filePath = path.join(base, rel);
+  if (!filePath.startsWith(base)) {
+    res.writeHead(403);
+    res.end('forbidden');
+    return true;
+  }
+  if (!fs.existsSync(filePath)) return false;
+  const ext = path.extname(filePath);
+  const types = {
+    '.html': 'text/html; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.zip': 'application/zip',
+    '.ps1': 'text/plain; charset=utf-8',
+  };
+  const body = fs.readFileSync(filePath);
+  res.writeHead(200, {
+    'Content-Type': types[ext] || 'application/octet-stream',
+    'Content-Length': body.length,
+    'Cache-Control': ext === '.json' ? 'no-store' : 'public, max-age=300',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(body);
+  return true;
+}
+
 function serveStatic(req, res, urlPath) {
   let rel = urlPath.replace(/^\/fleet\/?/, '') || 'panel.html';
   if (rel.includes('..')) {
@@ -708,6 +742,9 @@ async function handleFleetRequest(req, res, urlPath, url) {
 
   if (req.method === 'GET' && urlPath.startsWith('/fleet')) {
     if (serveStatic(req, res, urlPath)) return true;
+  }
+  if (req.method === 'GET' && urlPath.startsWith('/community')) {
+    if (serveCommunityStatic(req, res, urlPath)) return true;
   }
 
   if (req.method === 'POST' && urlPath === '/api/fleet/heartbeat') {
