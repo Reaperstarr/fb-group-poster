@@ -9,6 +9,8 @@ DIST="${ROOT}/irishka/dist"
 OUT_ZIP="${DIST}/COMMUNITY.zip"
 OUT_DIR="${DIST}/COMMUNITY"
 PKG="COMMUNITY"
+DOWNLOADS_COMMUNITY="${DOWNLOADS_COMMUNITY:-/home/nicolas/Downloads/community}"
+DOWNLOADS_ZIP="${DOWNLOADS_ZIP:-/home/nicolas/Downloads/COMMUNITY.zip}"
 PUBLISH_TO_SERVER="${PUBLISH_TO_SERVER:-0}"
 
 if [[ ! -f "${COMMUNITY_SRC}/manifest.json" ]]; then
@@ -37,6 +39,10 @@ rm -f "$OUT_ZIP"
 rm -rf "$OUT_DIR"
 cp -a "$STAGE/$PKG" "$OUT_DIR"
 
+mkdir -p "$DOWNLOADS_COMMUNITY"
+rsync -a --delete "$OUT_DIR/" "$DOWNLOADS_COMMUNITY/"
+cp -f "$OUT_ZIP" "$DOWNLOADS_ZIP"
+
 if [[ "$PUBLISH_TO_SERVER" == "1" ]]; then
   mkdir -p "$PUBLIC_DIR"
   cp -f "$OUT_ZIP" "${PUBLIC_DIR}/COMMUNITY.zip"
@@ -48,4 +54,6 @@ fi
 
 echo "Created ${OUT_ZIP} (v${VER})"
 echo "Folder: ${OUT_DIR}/"
-echo "Distribución manual: copiá COMMUNITY/ o el zip por AnyDesk/USB."
+echo "Downloads: ${DOWNLOADS_COMMUNITY}/"
+echo "Downloads zip: ${DOWNLOADS_ZIP}"
+echo "Distribución manual: copiá esa carpeta o el zip por AnyDesk/USB."
