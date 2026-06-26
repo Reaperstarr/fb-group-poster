@@ -1,27 +1,48 @@
-# Irishka Community — update script (Windows)
-# Run in PowerShell: irm https://fb-group-poster-production.up.railway.app/community/update-irishka.ps1 | iex
-# Or save and run:  .\update-irishka.ps1
+# Irishka Community — private update script (Windows)
+# NOT public — requires IRISHKA_FLEET_SECRET (same as Fleet Hub in Irishka settings).
+#
+# Usage:
+#   $env:IRISHKA_FLEET_SECRET = "your-fleet-secret"
+#   .\update-irishka.ps1
+#
+# Or:
+#   .\update-irishka.ps1 -FleetSecret "your-fleet-secret"
+
+param(
+  [string]$FleetSecret = $env:IRISHKA_FLEET_SECRET,
+  [string]$InstallDir = "C:\Irishka\COMMUNITY",
+  [string]$BaseUrl = "https://fb-group-poster-production.up.railway.app/community"
+)
 
 $ErrorActionPreference = "Stop"
 
-$BaseUrl = "https://fb-group-poster-production.up.railway.app/community"
-$InstallDir = "C:\Irishka\COMMUNITY"
+if (-not $FleetSecret) {
+  Write-Host "Missing Fleet secret." -ForegroundColor Red
+  Write-Host "Set: `$env:IRISHKA_FLEET_SECRET = '...'  (same as Irishka Fleet Hub settings)"
+  Write-Host "Or:  .\update-irishka.ps1 -FleetSecret '...'"
+  exit 1
+}
+
+$Headers = @{ Authorization = "Bearer $FleetSecret" }
 $ZipPath = Join-Path $env:TEMP "irishka-COMMUNITY.zip"
 
-Write-Host "Irishka Community updater" -ForegroundColor Cyan
+Write-Host "Irishka Community updater (private)" -ForegroundColor Cyan
 Write-Host "Install dir: $InstallDir"
 
 try {
-  $ver = Invoke-RestMethod -Uri "$BaseUrl/version.json" -TimeoutSec 30
+  $ver = Invoke-RestMethod -Uri "$BaseUrl/version.json" -Headers $Headers -TimeoutSec 30
   Write-Host "Remote version: $($ver.version) ($($ver.updatedAt))"
 } catch {
+  if ($_.Exception.Response.StatusCode.value__ -eq 401) {
+    throw "Unauthorized — check IRISHKA_FLEET_SECRET"
+  }
   Write-Warning "Could not fetch version.json — continuing anyway."
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 Write-Host "Downloading COMMUNITY.zip..."
-Invoke-WebRequest -Uri "$BaseUrl/COMMUNITY.zip" -OutFile $ZipPath -UseBasicParsing
+Invoke-WebRequest -Uri "$BaseUrl/COMMUNITY.zip" -Headers $Headers -OutFile $ZipPath -UseBasicParsing
 
 $extractRoot = Join-Path $env:TEMP "irishka-community-extract"
 if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot }
@@ -46,8 +67,5 @@ Write-Host ""
 Write-Host "Next steps (each Chrome profile):" -ForegroundColor Yellow
 Write-Host "  1. Open chrome://extensions"
 Write-Host "  2. Find 'Irishka Group Master by SBS — Community'"
-Write-Host "  3. Click Reload (circular arrow)"
+Write-Host "  3. Click Reload"
 Write-Host "  4. Confirm version shows $localVer"
-Write-Host ""
-Write-Host "If Load unpacked points elsewhere, update that folder or re-point to:" 
-Write-Host "  $InstallDir"

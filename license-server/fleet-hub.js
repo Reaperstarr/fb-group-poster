@@ -445,8 +445,17 @@ function startTelegramPolling() {
   console.log('[fleet-hub] Telegram bot polling started');
 }
 
-function serveCommunityStatic(req, res, urlPath) {
+function serveCommunityStatic(req, res, urlPath, url) {
   if (!urlPath.startsWith('/community')) return false;
+  // Private Community build — same auth as Fleet API (Bearer IRISHKA_FLEET_SECRET or Telegram admin).
+  if (!fleetAuthOk(req) && !webAppAuthOk(req, url)) {
+    res.writeHead(401, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end('Unauthorized — Fleet secret required for Community downloads');
+    return true;
+  }
   let rel = urlPath.replace(/^\/community\/?/, '') || 'version.json';
   if (rel.includes('..')) {
     res.writeHead(400);
@@ -472,8 +481,9 @@ function serveCommunityStatic(req, res, urlPath) {
   res.writeHead(200, {
     'Content-Type': types[ext] || 'application/octet-stream',
     'Content-Length': body.length,
-    'Cache-Control': ext === '.json' ? 'no-store' : 'public, max-age=300',
+    'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
+    'X-Robots-Tag': 'noindex, nofollow',
   });
   res.end(body);
   return true;
@@ -744,7 +754,7 @@ async function handleFleetRequest(req, res, urlPath, url) {
     if (serveStatic(req, res, urlPath)) return true;
   }
   if (req.method === 'GET' && urlPath.startsWith('/community')) {
-    if (serveCommunityStatic(req, res, urlPath)) return true;
+    if (serveCommunityStatic(req, res, urlPath, url)) return true;
   }
 
   if (req.method === 'POST' && urlPath === '/api/fleet/heartbeat') {
