@@ -91,7 +91,7 @@
             <button type="button" class="btn btn--ok remote-start-posting" data-cmd="start_posting" data-target="${id}" ${queueCount ? '' : 'disabled'}>▶ Iniciar publicación</button>
           </div>
           <p class="remote-compose-status" id="remoteComposeStatus" hidden></p>
-          <p class="remote-hint">Desde Fleet <strong>reemplaza</strong> el post en cola (si Irishka está en pausa). Usa <strong>Dejar 1 post</strong> si ves duplicados viejos.</p>
+          <p class="remote-hint">Añade posts con <strong>+ Añadir</strong> (se apilan en la cola). Cuando estés listo pulsa <strong>Iniciar publicación</strong>. Si ves duplicados viejos, usa <strong>Dejar 1 post</strong>.</p>
         </section>
 
         <section class="remote-section">

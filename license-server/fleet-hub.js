@@ -206,13 +206,23 @@ function enqueueCommand(deviceId, command, meta) {
   let cmdMeta = meta || {};
   if (command === 'queue_post' || command === 'push_post') {
     cmdMeta = hydratePostMetaImages(cmdMeta);
-    store.queues[deviceId] = (store.queues[deviceId] || []).filter(
-      (item) => item.command !== 'queue_post'
-    );
     const opId = String(cmdMeta.fleetOpId || '').trim();
     if (opId) {
       const dup = (store.queues[deviceId] || []).find((item) => item.meta?.fleetOpId === opId);
       if (dup) return dup;
+    }
+    const pendingPosts = (store.queues[deviceId] || []).filter((item) => item.command === 'queue_post');
+    if (pendingPosts.length >= 20) {
+      const drop = pendingPosts.length - 19;
+      let removed = 0;
+      store.queues[deviceId] = (store.queues[deviceId] || []).filter((item) => {
+        if (item.command === 'queue_post' && removed < drop) {
+          removed += 1;
+          return false;
+        }
+        return true;
+      });
+      saveFleetStore();
     }
   }
   const item = {
@@ -244,26 +254,20 @@ function hydratePostMetaImages(meta) {
 
 function drainCommandsForDevice(deviceId, max) {
   pruneStaleCommands(deviceId);
-  pruneQueuePostsKeepLatest(deviceId);
   const limit = Math.max(1, Math.min(Number(max) || 5, 10));
   const q = store.queues[deviceId] || [];
   if (!q.length) return [];
-  const batch = q.splice(0, limit);
-  let queuePostSeen = false;
   const out = [];
-  const droppedQueuePosts = [];
-  batch.forEach((item) => {
+  let queuePostsIncluded = 0;
+  while (q.length && out.length < limit) {
+    const item = q[0];
     if (item.command === 'queue_post') {
-      if (queuePostSeen) {
-        droppedQueuePosts.push(item);
-        return;
-      }
-      queuePostSeen = true;
+      if (queuePostsIncluded >= 1) break;
+      queuePostsIncluded += 1;
     }
-    out.push(item);
-  });
-  if (droppedQueuePosts.length) saveFleetStore();
-  else saveFleetStore();
+    out.push(q.shift());
+  }
+  saveFleetStore();
   return out;
 }
 
@@ -685,7 +689,6 @@ async function handlePoll(req, res, url) {
   const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
   if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
   pruneStaleCommands(deviceId);
-  pruneQueuePostsKeepLatest(deviceId);
   const q = store.queues[deviceId] || [];
   const item = q.shift();
   saveFleetStore();

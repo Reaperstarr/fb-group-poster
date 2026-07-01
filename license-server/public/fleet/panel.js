@@ -880,7 +880,7 @@
         imageName = file.name || 'fleet-image.jpg';
         try {
           const b64 = await fileToBase64(file);
-          if (file.size <= 900_000) imagesBase64 = [b64];
+          imagesBase64 = [b64];
           imageAssetId = await uploadPostImage(file, b64);
           if (!imageAssetId && !imagesBase64) toast('Imagen no subida — se añade solo el texto');
         } catch (imgErr) {
@@ -891,17 +891,10 @@
         }
       }
       setModalComposeBusy(true, 'Enviando al PC…');
-      try {
-        await apiPost('/api/fleet/command', {
-          command: 'clear_queue_posts',
-          deviceId,
-          target: deviceId,
-        });
-      } catch (_) {}
       const fleetOpId = (typeof crypto !== 'undefined' && crypto.randomUUID)
         ? crypto.randomUUID()
         : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const meta = { text, imageAssetId, fleetOpId, replaceQueue: true };
+      const meta = { text, imageAssetId, fleetOpId, replaceQueue: false };
       if (imagesBase64) meta.imagesBase64 = imagesBase64;
       if (imageMime) meta.imageMime = imageMime;
       if (imageName) meta.imageName = imageName;
