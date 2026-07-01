@@ -87,6 +87,7 @@
             <button type="button" class="btn btn--ghost remote-add-post" data-cmd="queue_post" data-target="${id}">+ Añadir a la cola</button>
             <button type="button" class="btn btn--ok remote-start-posting" data-cmd="start_posting" data-target="${id}" ${queueCount ? '' : 'disabled'}>▶ Iniciar publicación</button>
           </div>
+          <p class="remote-compose-status" id="remoteComposeStatus" hidden></p>
           <p class="remote-hint">Añade varios posts con <strong>+ Añadir</strong>; cuando estés listo pulsa <strong>Iniciar publicación</strong>.</p>
         </section>
 

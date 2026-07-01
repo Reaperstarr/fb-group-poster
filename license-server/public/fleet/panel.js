@@ -115,11 +115,30 @@
     const fromModal = !!opts?.fromModal;
     const el = document.getElementById('busyOverlay');
     const text = document.getElementById('busyText');
-    if (el) el.hidden = !on || (fromModal && isModalOpen());
+    const hideForModalShot = on && fromModal && isModalOpen();
+    if (el) {
+      el.hidden = !on || hideForModalShot;
+      el.classList.toggle('busy--over-modal', !!on && isModalOpen() && !hideForModalShot);
+    }
     if (text && msg) text.textContent = msg;
     document.querySelectorAll('.card__actions [data-cmd], .toolbar [data-cmd], .fleet-icon-row [data-cmd], .fleet-btn[data-cmd]').forEach((b) => {
       b.disabled = on;
     });
+  }
+
+  function setModalComposeBusy(on, msg) {
+    const bodyEl = document.getElementById('modalBody');
+    if (!bodyEl) return;
+    bodyEl.querySelectorAll('.remote-add-post, .remote-start-posting').forEach((b) => {
+      b.disabled = !!on;
+    });
+    const status = bodyEl.querySelector('#remoteComposeStatus');
+    if (status) {
+      const show = !!on || !!msg;
+      status.hidden = !show;
+      status.textContent = msg || (on ? 'Enviando…' : '');
+      status.classList.toggle('remote-compose-status--busy', !!on);
+    }
   }
 
   function setModalShotLoading(on) {
@@ -722,13 +741,29 @@
     return fetchDeviceState(deviceId);
   }
 
+  async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const raw = String(reader.result || '');
+        const b64 = raw.replace(/^data:[^;]+;base64,/, '');
+        if (!b64) reject(new Error('empty_image'));
+        else resolve(b64);
+      };
+      reader.onerror = () => reject(new Error('read_failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function uploadPostImage(file) {
     if (!file) return null;
-    const buf = await file.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const imageBase64 = btoa(binary);
+    const maxBytes = 1_800_000;
+    if (file.size > maxBytes) {
+      const err = new Error('Image too large');
+      err.status = 413;
+      throw err;
+    }
+    const imageBase64 = await fileToBase64(file);
     const resp = await apiPost('/api/fleet/post-asset', {
       imageBase64,
       mime: file.type || 'image/jpeg',
@@ -804,18 +839,35 @@
       return;
     }
     const file = bodyEl?.querySelector('#remotePostImage')?.files?.[0] || null;
-    setBusy(true, 'Añadiendo post…');
+    setModalComposeBusy(true, file ? 'Subiendo imagen…' : 'Añadiendo a la cola…');
+    setBusy(true, file ? 'Subiendo imagen…' : 'Añadiendo post…');
+    toast(file ? 'Subiendo imagen y añadiendo post…' : 'Añadiendo post a la cola…');
     try {
       let imageAssetId = null;
-      if (file) imageAssetId = await uploadPostImage(file);
+      if (file) {
+        try {
+          imageAssetId = await uploadPostImage(file);
+          if (!imageAssetId) toast('Imagen no subida — se añade solo el texto');
+        } catch (imgErr) {
+          const imgMsg = imgErr.status === 413
+            ? 'Imagen muy grande (máx ~1.8 MB) — se añade solo el texto'
+            : 'No se pudo subir la imagen — se añade solo el texto';
+          toast(imgMsg);
+        }
+      }
+      setModalComposeBusy(true, 'Enviando al PC…');
       await apiPost('/api/fleet/command', {
         command: 'queue_post',
         deviceId,
         target: deviceId,
         meta: { text, imageAssetId },
       });
-      const lr = await waitForCommandResult(deviceId, 'queue_post', 35000);
-      toast(lr?.message || (lr?.ok ? 'Post añadido' : 'Error al añadir'));
+      const lr = await waitForCommandResult(deviceId, 'queue_post', 45000);
+      if (!lr) {
+        toast('Comando enviado — espera unos segundos y pulsa Actualizar estado');
+      } else {
+        toast(lr.message || (lr.ok ? 'Post añadido' : 'Error al añadir'));
+      }
       const ta = bodyEl?.querySelector('#remotePostText');
       const fi = bodyEl?.querySelector('#remotePostImage');
       if (ta) ta.value = '';
@@ -823,8 +875,13 @@
       await refresh();
       await showRemotePanel(deviceId);
     } catch (e) {
-      toast('No se pudo añadir el post');
+      const msg = e.status === 401
+        ? 'No autorizado — revisa el fleet secret'
+        : (e.status === 413 ? 'Imagen demasiado grande' : 'No se pudo añadir el post');
+      toast(msg);
+      console.error('[fleet] submitQueuePost', e);
     } finally {
+      setModalComposeBusy(false);
       setBusy(false);
     }
   }
@@ -1025,6 +1082,35 @@
         if (deviceId) {
           e.preventDefault();
           showRemotePanel(deviceId).catch(() => toast('No se pudo abrir panel'));
+        }
+        return;
+      }
+      const queueBtn = e.target.closest('[data-cmd="queue_post"], [data-cmd="push_post"]');
+      if (queueBtn && !queueBtn.disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = queueBtn.getAttribute('data-target') || modalDeviceId;
+        if (target && target !== 'all') {
+          submitQueuePost(target).catch((err) => {
+            console.error('[fleet] queue_post', err);
+            toast('Error al añadir — reintenta');
+            setModalComposeBusy(false);
+            setBusy(false);
+          });
+        }
+        return;
+      }
+      const startBtn = e.target.closest('[data-cmd="start_posting"]');
+      if (startBtn && !startBtn.disabled) {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = startBtn.getAttribute('data-target') || modalDeviceId;
+        if (target && target !== 'all') {
+          submitStartPosting(target).catch((err) => {
+            console.error('[fleet] start_posting', err);
+            toast('Error al iniciar publicación');
+            setBusy(false);
+          });
         }
         return;
       }

@@ -743,6 +743,7 @@ html, body {
   justify-content: center;
   background: rgba(0,0,0,.55);
 }
+.busy--over-modal { z-index: 360; }
 .busy[hidden] { display: none !important; }
 .busy__box {
   background: var(--card);
@@ -1013,6 +1014,19 @@ html, body {
 }
 .remote-compose-actions .btn { flex: 1; min-width: 140px; min-height: 44px; }
 .remote-compose-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.remote-compose-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--accent);
+}
+.remote-compose-status--busy {
+  animation: pulseText 1.2s ease-in-out infinite;
+}
+@keyframes pulseText {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 .remote-hint {
   margin: 8px 0 0;
   font-size: 11px;
