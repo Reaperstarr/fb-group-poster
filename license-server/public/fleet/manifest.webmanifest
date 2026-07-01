@@ -5,8 +5,8 @@
   "start_url": "/fleet/panel.html",
   "scope": "/fleet/",
   "display": "standalone",
-  "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "background_color": "#05070d",
+  "theme_color": "#05070d",
   "orientation": "portrait-primary",
   "icons": [
     {

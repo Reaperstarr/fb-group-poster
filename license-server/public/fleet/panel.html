@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#070d18">
+  <meta name="theme-color" content="#05070d">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Irishka Fleet">
@@ -11,21 +11,24 @@
   <title>Irishka Fleet</title>
   <link rel="manifest" href="/fleet/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/fleet/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="panel.css?v=8">
+  <link rel="stylesheet" href="panel.css?v=9">
 </head>
 <body>
   <div class="app" id="app">
     <header class="header">
       <div class="header__brand">
-        <img class="header__logo" src="/fleet/icon-192.png" width="36" height="36" alt="">
+        <img class="header__logo" src="/fleet/icon-192.png" width="38" height="38" alt="">
         <div>
           <h1>Irishka Fleet</h1>
           <p class="header__sub" id="summaryLine">Loading…</p>
         </div>
       </div>
-      <button type="button" class="icon-btn" id="btnRefresh" title="Refresh">↻</button>
-      <button type="button" class="icon-btn" id="btnInstall" title="Install app" hidden>⬇</button>
+      <button type="button" class="icon-btn" id="btnRefresh" title="Refresh" aria-label="Refresh"></button>
+      <button type="button" class="icon-btn" id="btnInstall" title="Install app" aria-label="Install" hidden></button>
     </header>
 
     <section class="summary" id="summaryCards"></section>
@@ -37,9 +40,9 @@
     </section>
 
     <section class="toolbar">
-      <button type="button" class="btn btn--ghost" data-cmd="status" data-target="all">📊 All status</button>
-      <button type="button" class="btn btn--warn" data-cmd="stop" data-target="all">⏸ Pause all</button>
-      <button type="button" class="btn btn--ok" data-cmd="resume" data-target="all">▶ Resume all</button>
+      <button type="button" class="btn btn--ghost" data-cmd="status" data-target="all">All status</button>
+      <button type="button" class="btn btn--warn" data-cmd="stop" data-target="all">Pause all</button>
+      <button type="button" class="btn btn--ok" data-cmd="resume" data-target="all">Resume all</button>
     </section>
 
     <main class="list" id="instanceList">
@@ -66,13 +69,14 @@
     <div class="modal__sheet" role="dialog" aria-modal="true">
       <div class="modal__head">
         <h2 id="modalTitle">Details</h2>
-        <button type="button" class="icon-btn" id="modalClose" aria-label="Close">×</button>
+        <button type="button" class="icon-btn" id="modalClose" aria-label="Close"></button>
       </div>
       <div class="modal__body" id="modalBody"></div>
     </div>
   </div>
 
-  <script src="panel-remote.js?v=5"></script>
-  <script src="panel.js?v=18"></script>
+  <script src="panel-icons.js?v=1"></script>
+  <script src="panel-remote.js?v=6"></script>
+  <script src="panel.js?v=19"></script>
 </body>
 </html>

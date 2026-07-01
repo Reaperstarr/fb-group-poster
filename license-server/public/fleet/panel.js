@@ -17,6 +17,32 @@
   let pauseNotifyAsked = false;
   let visionGlobalEnabled = true;
 
+  function ic(name, className) {
+    return (window.FleetIcons && FleetIcons.icon(name, className)) || '';
+  }
+
+  function decorateStaticIcons() {
+    const map = [
+      ['btnRefresh', 'refresh'],
+      ['btnInstall', 'download'],
+      ['modalClose', 'close'],
+    ];
+    map.forEach(([id, iconName]) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = ic(iconName, 'fi--md');
+    });
+    const toolbarBtns = [
+      ['status', 'chart', 'All status'],
+      ['stop', 'pause', 'Pause all'],
+      ['resume', 'play', 'Resume all'],
+    ];
+    document.querySelectorAll('.toolbar [data-cmd]').forEach((btn) => {
+      const cmd = btn.getAttribute('data-cmd');
+      const spec = toolbarBtns.find((t) => t[0] === cmd);
+      if (!spec) return;
+      btn.innerHTML = `${ic(spec[1], 'fi--sm')}<span>${spec[2]}</span>`;
+    });
+  }
   const STATE_LABEL = {
     posting: 'Posting',
     paused: 'Paused',
@@ -226,7 +252,7 @@
       } catch (_) {}
     }
 
-    toast(`⏸ ${title}`);
+    toast(`Pausado: ${title}`);
   }
 
   function detectPauseTransitions(instances) {
@@ -289,15 +315,15 @@
   function modalActionsHtml(deviceId, inst) {
     const id = escapeAttr(deviceId);
     const lastShot = inst?.hasScreenshot
-      ? `<button type="button" class="btn btn--ghost modal__action" data-cmd="viewshot" data-target="${id}">🖼 Ver captura</button>`
+      ? `<button type="button" class="btn btn--ghost modal__action" data-cmd="viewshot" data-target="${id}">${ic('image', 'fi--sm')} Ver captura</button>`
       : '';
     return `${visionAutoToggleHtml(inst)}
     <div class="modal__actions">
-      <button type="button" class="btn btn--ok modal__action modal__action--primary" data-cmd="screenshot" data-target="${id}">📸 Capturar pantalla</button>
+      <button type="button" class="btn btn--ok modal__action modal__action--primary" data-cmd="screenshot" data-target="${id}">${ic('camera', 'fi--sm')} Capturar pantalla</button>
       ${lastShot}
-      <button type="button" class="btn btn--ghost modal__action" data-cmd="consolidate_fb" data-target="${id}">🧹 Cerrar FB duplicadas</button>
-      <button type="button" class="btn btn--warn modal__action" data-cmd="stop" data-target="${id}">⏸ Pausar</button>
-      <button type="button" class="btn btn--ghost modal__action" data-cmd="resume" data-target="${id}">▶ Reanudar</button>
+      <button type="button" class="btn btn--ghost modal__action" data-cmd="consolidate_fb" data-target="${id}">${ic('broom', 'fi--sm')} Cerrar FB duplicadas</button>
+      <button type="button" class="btn btn--warn modal__action" data-cmd="stop" data-target="${id}">${ic('pause', 'fi--sm')} Pausar</button>
+      <button type="button" class="btn btn--ghost modal__action" data-cmd="resume" data-target="${id}">${ic('play', 'fi--sm')} Reanudar</button>
     </div>`;
   }
 
@@ -312,7 +338,7 @@
       : 'Clasifica pausas con IA y auto-resume si no es crítico';
     return `<div class="modal__settings">
       <label class="toggle-row" title="${escapeAttr(hint)}">
-        <span class="toggle-row__label">🤖 AI automático</span>
+        <span class="toggle-row__label">${ic('sparkles', 'fi--sm fi--accent')} AI automático</span>
         <span class="toggle">
           <input type="checkbox" class="toggle__input" data-vision-toggle="${id}" ${checked} ${disabled}>
           <span class="toggle__track" aria-hidden="true"></span>
@@ -354,13 +380,17 @@
 
   function renderSummary(summary) {
     const cards = [
-      { n: summary.total, l: 'Total', c: '' },
-      { n: summary.posting, l: 'Live', c: 'var(--green)' },
-      { n: summary.paused, l: 'Paused', c: 'var(--yellow)' },
-      { n: summary.offline, l: 'Off', c: 'var(--red)' },
+      { n: summary.total, l: 'Total', tone: 'total', icon: 'layers' },
+      { n: summary.posting, l: 'Live', tone: 'live', icon: 'activity', c: 'var(--green)' },
+      { n: summary.paused, l: 'Paused', tone: 'paused', icon: 'pause', c: 'var(--yellow)' },
+      { n: summary.offline, l: 'Off', tone: 'off', icon: 'wifi-off', c: 'var(--red)' },
     ];
     document.getElementById('summaryCards').innerHTML = cards.map((c) =>
-      `<div class="summary-card"><div class="summary-card__n" style="color:${c.c || 'inherit'}">${c.n}</div><div class="summary-card__l">${c.l}</div></div>`
+      `<div class="summary-card summary-card--${c.tone}">
+        <div class="summary-card__icon">${ic(c.icon, 'fi--md')}</div>
+        <div class="summary-card__n" style="color:${c.c || 'inherit'}">${c.n}</div>
+        <div class="summary-card__l">${c.l}</div>
+      </div>`
     ).join('');
     setSummaryLine(`${summary.posting} posting · ${summary.paused} paused · ${summary.offline} offline`);
   }
@@ -398,7 +428,7 @@
         ? formatAgo(inst.offlineSinceMs)
         : (total > 0 ? `${done}/${total} · ${ok}ok` : '—');
       const groupTip = p.currentGroup ? escapeAttr(p.currentGroup) : '';
-      const groupMark = p.currentGroup ? `<span class="card__pin" title="${groupTip}">📍</span>` : '';
+      const groupMark = p.currentGroup ? `<span class="fleet-card__chip fleet-card__chip--pin" title="${groupTip}">${ic('pin', 'fi--sm')} Grupo</span>` : '';
       const progress = total > 0
         ? `<div class="progress progress--thin progress--${tone}"><div class="progress__bar" style="width:${bar}%"></div></div>`
         : '';
@@ -420,6 +450,7 @@
       const fbLabel = inst.facebookConnected ? 'FB' : 'FB off';
       const aiChip = `<label class="fleet-card__chip fleet-card__chip--ai" title="${escapeAttr(aiTitle)}" onclick="event.stopPropagation()">
         <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
+        ${ic('sparkles', 'fi--sm')}
         <span>AI</span>
       </label>`;
       return `
@@ -432,8 +463,8 @@
             </div>
             <div class="fleet-card__meta">
               <span class="fleet-card__stat">${meta}</span>
-              ${groupMark ? `<span class="fleet-card__chip fleet-card__chip--pin" title="${groupTip}">Grupo</span>` : ''}
-              <span class="fleet-card__chip fleet-card__chip--fb ${fbClass}" title="${escapeAttr(fbTitle)}">${fbLabel}</span>
+              ${groupMark ? groupMark : ''}
+              <span class="fleet-card__chip fleet-card__chip--fb ${fbClass}" title="${escapeAttr(fbTitle)}">${ic('facebook', 'fi--sm')} ${fbLabel}</span>
               ${groupsPreview}
               ${aiChip}
             </div>
@@ -442,14 +473,15 @@
           </button>
           <div class="fleet-card__actions">
             <button type="button" class="fleet-btn fleet-btn--primary" data-cmd="remote_panel" data-target="${id}">
+              ${ic('grid', 'fi--sm')}
               <span class="fleet-btn__label">Panel</span>
             </button>
             <div class="fleet-icon-row">
-              <button type="button" class="fleet-icon-btn" data-cmd="stop" data-target="${id}" title="Pausar" aria-label="Pausar">⏸</button>
-              <button type="button" class="fleet-icon-btn fleet-icon-btn--ok" data-cmd="resume" data-target="${id}" title="Reanudar" aria-label="Reanudar">▶</button>
-              <button type="button" class="fleet-icon-btn" data-cmd="status" data-target="${id}" title="Estado" aria-label="Estado">ℹ</button>
-              <button type="button" class="fleet-icon-btn" data-cmd="screenshot" data-target="${id}" title="Captura" aria-label="Captura">◫</button>
-              <button type="button" class="fleet-icon-btn fleet-icon-btn--danger" data-cmd="remove" data-target="${id}" title="Quitar" aria-label="Quitar">✕</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--warn" data-cmd="stop" data-target="${id}" title="Pausar" aria-label="Pausar">${ic('pause')}</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--ok" data-cmd="resume" data-target="${id}" title="Reanudar" aria-label="Reanudar">${ic('play')}</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--info" data-cmd="status" data-target="${id}" title="Estado" aria-label="Estado">${ic('info')}</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--shot" data-cmd="screenshot" data-target="${id}" title="Captura" aria-label="Captura">${ic('camera')}</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--danger" data-cmd="remove" data-target="${id}" title="Quitar" aria-label="Quitar">${ic('trash')}</button>
             </div>
           </div>
         </article>`;
@@ -980,11 +1012,11 @@
     const inst = findInstance(target);
     const name = inst?.instanceName || 'Irishka';
     const labels = {
-      scan_groups: '🔍 Escaneando grupos',
-      verify_groups: '✅ Verificando grupos',
-      start_join: '▶ Iniciando join',
-      stop_join: '⏹ Parando join',
-      open_app: '🍀 Abriendo Irishka',
+      scan_groups: 'Escaneando grupos',
+      verify_groups: 'Verificando grupos',
+      start_join: 'Iniciando join',
+      stop_join: 'Parando join',
+      open_app: 'Abriendo Irishka',
       get_state: '↻ Sincronizando',
     };
     setBusy(true, `${labels[command] || command} ${name}…`);
@@ -1089,7 +1121,7 @@
     if ((command === 'stop' || command === 'resume' || command === 'consolidate_fb' || command === 'cleanfb') && target !== 'all') {
       const inst = findInstance(target);
       const name = inst?.instanceName || 'Irishka';
-      const labels = { stop: '⏸ Pausando', resume: '▶ Reanudando', consolidate_fb: '🧹 Limpiando FB', cleanfb: '🧹 Limpiando FB' };
+      const labels = { stop: 'Pausando', resume: 'Reanudando', consolidate_fb: 'Limpiando FB', cleanfb: 'Limpiando FB' };
       setBusy(true, `${labels[command] || command} ${name}…`);
       try {
         await apiPost('/api/fleet/command', { command, deviceId: target, target });
@@ -1279,12 +1311,13 @@
     if (tg) {
       tg.ready();
       tg.expand();
-      tg.setHeaderColor('#070d18');
-      tg.setBackgroundColor('#070d18');
+      tg.setHeaderColor('#05070d');
+      tg.setBackgroundColor('#05070d');
       initData = tg.initData || '';
     }
 
     bindActions();
+    decorateStaticIcons();
     registerServiceWorker();
     setupInstallPrompt();
 
