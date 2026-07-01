@@ -786,6 +786,21 @@ async function handleDeviceState(req, res) {
       ...state,
       updatedAt: state.updatedAt || new Date().toISOString(),
     };
+    const inst = store.instances[deviceId];
+    if (inst && state.remoteSnapshot && typeof state.remoteSnapshot === 'object') {
+      inst.remoteSnapshot = state.remoteSnapshot;
+    }
+    if (inst && Array.isArray(state.posts)) {
+      inst.remoteSnapshot = {
+        ...(inst.remoteSnapshot || {}),
+        totalPosts: state.posts.length,
+        postsPreview: state.posts.map((p, i) => ({
+          index: i,
+          preview: String(p.preview || p.text || '').slice(0, 140),
+          hasImages: !!(p.hasImages || (Array.isArray(p.images) && p.images.length)),
+        })),
+      };
+    }
     saveFleetStore();
     return fleetJson(res, 200, { ok: true });
   } catch (e) {

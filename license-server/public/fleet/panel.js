@@ -730,9 +730,40 @@
     try {
       const data = await apiGet(`/api/fleet/device-state?deviceId=${encodeURIComponent(deviceId)}`);
       return data.ok ? data.state : null;
-    } catch (_) {
+    } catch (e) {
+      if (e.status !== 404) return null;
       return null;
     }
+  }
+
+  function mergeInstanceRemoteState(inst, state) {
+    if (state) return state;
+    const snap = inst?.remoteSnapshot;
+    if (!snap || !Array.isArray(snap.postsPreview) || !snap.postsPreview.length) return null;
+    return {
+      remoteSnapshot: snap,
+      posts: snap.postsPreview,
+      partial: true,
+    };
+  }
+
+  async function ensureRemoteState(deviceId, inst) {
+    let state = await fetchDeviceState(deviceId);
+    if (state) return state;
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 600 : 1800));
+      try {
+        await apiPost('/api/fleet/command', { command: 'get_state', deviceId, target: deviceId });
+        await waitForCommandResult(deviceId, 'get_state', 22000);
+      } catch (_) {}
+      state = await fetchDeviceState(deviceId);
+      if (state) return state;
+      const data = await refresh();
+      const fresh = (data?.instances || []).find((x) => x.deviceId === deviceId) || inst;
+      state = mergeInstanceRemoteState(fresh, null);
+      if (state?.posts?.length) return state;
+    }
+    return mergeInstanceRemoteState(inst, null);
   }
 
   async function refreshRemoteState(deviceId) {
@@ -780,20 +811,17 @@
     }
     const name = inst.instanceName || 'Irishka';
     setBusy(true, `Cargando ${name}…`);
-    let state = await fetchDeviceState(deviceId);
-    if (!state) {
-      try {
-        state = await refreshRemoteState(deviceId);
-      } catch (_) {}
-    }
+    const state = await ensureRemoteState(deviceId, inst);
     setBusy(false);
     const FR = window.__fleetRemote || {};
     const html = FR.remotePanelHtml
       ? FR.remotePanelHtml(inst, state)
       : '<p>Remote panel unavailable</p>';
     openModal(`${name} — Control remoto`, html + modalActionsHtml(deviceId, inst), deviceId, { wide: true });
-    if (!state) {
-      toast('Estado parcial — pulsa Actualizar estado');
+    if (!state || state.partial) {
+      toast(state?.partial
+        ? 'Vista desde último heartbeat — pulsa Actualizar estado para sincronizar'
+        : 'Estado parcial — pulsa Actualizar estado');
     }
   }
 
@@ -875,15 +903,18 @@
       });
       const lr = await waitForCommandResult(deviceId, 'queue_post', 45000);
       if (!lr) {
-        toast('Comando enviado — espera unos segundos y pulsa Actualizar estado');
+        toast('Comando enviado — sincronizando…');
+      } else if (!lr.ok) {
+        toast(lr.message || 'Error al añadir');
       } else {
-        toast(lr.message || (lr.ok ? 'Post añadido' : 'Error al añadir'));
+        toast(lr.message || 'Post añadido');
       }
       const ta = bodyEl?.querySelector('#remotePostText');
       const fi = bodyEl?.querySelector('#remotePostImage');
       if (ta) ta.value = '';
       if (fi) fi.value = '';
       await refresh();
+      await new Promise((r) => setTimeout(r, 1200));
       await showRemotePanel(deviceId);
     } catch (e) {
       const msg = e.status === 401
