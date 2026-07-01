@@ -235,14 +235,18 @@
     return Math.min(100, Math.round((done / total) * 100));
   }
 
-  function openModal(title, html, deviceId) {
+  function openModal(title, html, deviceId, opts) {
     const modal = document.getElementById('fleetModal');
     const titleEl = document.getElementById('modalTitle');
     const bodyEl = document.getElementById('modalBody');
+    const sheet = modal?.querySelector('.modal__sheet');
     if (!modal || !titleEl || !bodyEl) return;
     modalDeviceId = deviceId || '';
     titleEl.textContent = title;
     bodyEl.innerHTML = html;
+    if (sheet) {
+      sheet.classList.toggle('modal__sheet--wide', !!opts?.wide);
+    }
     modal.hidden = false;
     document.body.style.overflow = 'hidden';
   }
@@ -388,9 +392,19 @@
         <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
         <span class="card__ai-label">🤖 AI</span>
       </label>`;
+      const FR = window.__fleetRemote || {};
+      const snap = inst.remoteSnapshot || {};
+      const postLine = FR.postPreviewLine ? FR.postPreviewLine(snap) : '';
+      const groupsLine = FR.groupsLine ? FR.groupsLine(snap) : '';
+      const postPreview = postLine
+        ? `<p class="card__post-preview" title="${escapeAttr(postLine)}">${escapeHtml(postLine)}</p>`
+        : '';
+      const groupsPreview = groupsLine
+        ? `<p class="card__groups-line">${escapeHtml(groupsLine)}</p>`
+        : '';
       return `
-        <article class="card card--dense card--tone-${tone}" data-id="${id}" data-tone="${tone}">
-          <div class="card__body">
+        <article class="card card--roomy card--tone-${tone}" data-id="${id}" data-tone="${tone}">
+          <div class="card__body" data-open-remote="${id}" role="button" tabindex="0" title="Abrir panel remoto">
             <div class="card__main">
               <div class="card__head">
                 <span class="card__title" title="${name}">${name}</span>
@@ -402,10 +416,13 @@
                 <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
                 ${aiToggle}
               </div>
+              ${postPreview}
+              ${groupsPreview}
               ${progress}
             </div>
           </div>
-          <div class="card__actions card__actions--bar">
+          <div class="card__actions card__actions--bar card__actions--bar--6">
+            <button type="button" class="btn btn--action btn--action--plus" data-cmd="remote_panel" data-target="${id}" title="Panel remoto">+</button>
             <button type="button" class="btn btn--action btn--ghost" data-cmd="status" data-target="${id}" title="Status">📊</button>
             <button type="button" class="btn btn--action btn--warn" data-cmd="stop" data-target="${id}" title="Pause">⏸</button>
             <button type="button" class="btn btn--action btn--ok" data-cmd="resume" data-target="${id}" title="Resume">▶</button>
@@ -686,8 +703,176 @@
     return null;
   }
 
+  async function fetchDeviceState(deviceId) {
+    try {
+      const data = await apiGet(`/api/fleet/device-state?deviceId=${encodeURIComponent(deviceId)}`);
+      return data.ok ? data.state : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function refreshRemoteState(deviceId) {
+    await apiPost('/api/fleet/command', { command: 'get_state', deviceId, target: deviceId });
+    await waitForCommandResult(deviceId, 'get_state', 20000);
+    return fetchDeviceState(deviceId);
+  }
+
+  async function uploadPostImage(file) {
+    if (!file) return null;
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const imageBase64 = btoa(binary);
+    const resp = await apiPost('/api/fleet/post-asset', {
+      imageBase64,
+      mime: file.type || 'image/jpeg',
+      name: file.name || 'fleet-image.jpg',
+    });
+    return resp.assetId || null;
+  }
+
+  async function showRemotePanel(deviceId) {
+    const inst = findInstance(deviceId);
+    if (!inst) {
+      toast('Instance not found');
+      return;
+    }
+    const name = inst.instanceName || 'Irishka';
+    setBusy(true, `Cargando ${name}…`);
+    let state = await fetchDeviceState(deviceId);
+    if (!state) {
+      try {
+        state = await refreshRemoteState(deviceId);
+      } catch (_) {}
+    }
+    setBusy(false);
+    const FR = window.__fleetRemote || {};
+    const html = FR.remotePanelHtml
+      ? FR.remotePanelHtml(inst, state)
+      : '<p>Remote panel unavailable</p>';
+    openModal(`${name} — Control remoto`, html + modalActionsHtml(deviceId, inst), deviceId, { wide: true });
+    if (!state) {
+      toast('Estado parcial — pulsa Actualizar estado');
+    }
+  }
+
+  async function saveRemoteGroupSelection(deviceId) {
+    const bodyEl = document.getElementById('modalBody');
+    if (!bodyEl) return;
+    const checks = [...bodyEl.querySelectorAll('.remote-group__check')];
+    const selectedUrls = checks.filter((c) => c.checked).map((c) => c.getAttribute('data-group-url')).filter(Boolean);
+    const deselectedUrls = checks.filter((c) => !c.checked).map((c) => c.getAttribute('data-group-url')).filter(Boolean);
+    setBusy(true, 'Guardando grupos…');
+    try {
+      if (selectedUrls.length) {
+        await apiPost('/api/fleet/command', {
+          command: 'toggle_groups',
+          deviceId,
+          target: deviceId,
+          meta: { urls: selectedUrls, selected: true },
+        });
+      }
+      if (deselectedUrls.length) {
+        await apiPost('/api/fleet/command', {
+          command: 'toggle_groups',
+          deviceId,
+          target: deviceId,
+          meta: { urls: deselectedUrls, selected: false },
+        });
+      }
+      await waitForCommandResult(deviceId, 'toggle_groups', 15000);
+      toast('Selección de grupos enviada');
+      await showRemotePanel(deviceId);
+    } catch (e) {
+      toast('No se pudo guardar grupos');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPushPost(deviceId) {
+    const bodyEl = document.getElementById('modalBody');
+    const text = String(bodyEl?.querySelector('#remotePostText')?.value || '').trim();
+    if (!text) {
+      toast('Escribe el mensaje (spintax)');
+      return;
+    }
+    const file = bodyEl?.querySelector('#remotePostImage')?.files?.[0] || null;
+    setBusy(true, 'Enviando post…');
+    try {
+      let imageAssetId = null;
+      if (file) imageAssetId = await uploadPostImage(file);
+      await apiPost('/api/fleet/command', {
+        command: 'push_post',
+        deviceId,
+        target: deviceId,
+        meta: { text, imageAssetId, startPosting: true },
+      });
+      const lr = await waitForCommandResult(deviceId, 'push_post', 35000);
+      toast(lr?.message || (lr?.ok ? 'Post enviado' : 'Error al publicar'));
+      await refresh();
+      await showRemotePanel(deviceId);
+    } catch (e) {
+      toast('Push post failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendRemoteCommand(command, target, meta) {
+    const inst = findInstance(target);
+    const name = inst?.instanceName || 'Irishka';
+    const labels = {
+      scan_groups: '🔍 Escaneando grupos',
+      verify_groups: '✅ Verificando grupos',
+      start_join: '▶ Iniciando join',
+      stop_join: '⏹ Parando join',
+      open_app: '🍀 Abriendo Irishka',
+      get_state: '↻ Sincronizando',
+    };
+    setBusy(true, `${labels[command] || command} ${name}…`);
+    try {
+      await apiPost('/api/fleet/command', {
+        command,
+        deviceId: target,
+        target,
+        meta: meta || {},
+      });
+      const lr = await waitForCommandResult(target, command, 45000);
+      toast(lr?.message || `${command} enviado`);
+      if (command === 'get_state' || command === 'scan_groups' || command === 'verify_groups') {
+        await showRemotePanel(target);
+      }
+      await refresh();
+    } catch (e) {
+      toast(e.status === 401 ? 'Unauthorized' : 'Command failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendCommand(command, target) {
     if (busy && command === 'screenshot' && !(isModalOpen() && modalDeviceId === target)) return;
+    if (command === 'remote_panel' && target !== 'all') {
+      await showRemotePanel(target);
+      return;
+    }
+    if (command === 'push_post' && target !== 'all') {
+      await submitPushPost(target);
+      return;
+    }
+    if (command === 'refresh_remote' && target !== 'all') {
+      await sendRemoteCommand('get_state', target);
+      return;
+    }
+    if (['scan_groups', 'verify_groups', 'start_join', 'stop_join', 'open_app'].includes(command) && target !== 'all') {
+      const btn = document.querySelector(`[data-cmd="${command}"][data-target="${target}"]`);
+      const scope = btn?.getAttribute('data-scope') || 'all';
+      await sendRemoteCommand(command, target, command === 'verify_groups' ? { scope } : {});
+      return;
+    }
     if (command === 'status' && target !== 'all') {
       await showStatus(target);
       return;
@@ -753,6 +938,23 @@
       });
     });
     document.body.addEventListener('click', (e) => {
+      const saveBtn = e.target.closest('#remoteSaveGroups');
+      if (saveBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const deviceId = saveBtn.getAttribute('data-target') || modalDeviceId;
+        if (deviceId) saveRemoteGroupSelection(deviceId).catch(() => toast('Error guardando grupos'));
+        return;
+      }
+      const remoteBody = e.target.closest('[data-open-remote]');
+      if (remoteBody && !e.target.closest('[data-cmd],[data-vision-toggle],button,a,input,label')) {
+        const deviceId = remoteBody.getAttribute('data-open-remote');
+        if (deviceId) {
+          e.preventDefault();
+          showRemotePanel(deviceId).catch(() => toast('No se pudo abrir panel'));
+        }
+        return;
+      }
       const btn = e.target.closest('[data-cmd]');
       if (!btn || btn.disabled) return;
       e.preventDefault();

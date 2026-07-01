@@ -26,8 +26,8 @@ const ALLOWED_USER_IDS = String(process.env.IRISHKA_FLEET_ADMIN_USER_IDS || '')
 const OFFLINE_MS = Math.max(60000, Number(process.env.IRISHKA_FLEET_OFFLINE_MS || 120000));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-/** @type {{ instances: Record<string, object>, queues: Record<string, object[]>, tgOffset: number }} */
-let store = { instances: {}, queues: {}, tgOffset: 0 };
+/** @type {{ instances: Record<string, object>, queues: Record<string, object[]>, deviceStates: Record<string, object>, postAssets: Record<string, object>, tgOffset: number }} */
+let store = { instances: {}, queues: {}, deviceStates: {}, postAssets: {}, tgOffset: 0 };
 let tgPollTimer = null;
 
 function loadFleetStore() {
@@ -36,6 +36,8 @@ function loadFleetStore() {
     const raw = JSON.parse(fs.readFileSync(FLEET_STORE_FILE, 'utf8') || '{}');
     store.instances = raw.instances && typeof raw.instances === 'object' ? raw.instances : {};
     store.queues = raw.queues && typeof raw.queues === 'object' ? raw.queues : {};
+    store.deviceStates = raw.deviceStates && typeof raw.deviceStates === 'object' ? raw.deviceStates : {};
+    store.postAssets = raw.postAssets && typeof raw.postAssets === 'object' ? raw.postAssets : {};
     store.tgOffset = Number(raw.tgOffset) || 0;
   } catch (e) {
     console.error('[fleet-hub] load error:', e.message);
@@ -46,7 +48,13 @@ function saveFleetStore() {
   try {
     fs.writeFileSync(
       FLEET_STORE_FILE,
-      JSON.stringify({ instances: store.instances, queues: store.queues, tgOffset: store.tgOffset }, null, 2),
+      JSON.stringify({
+        instances: store.instances,
+        queues: store.queues,
+        deviceStates: store.deviceStates,
+        postAssets: store.postAssets,
+        tgOffset: store.tgOffset,
+      }, null, 2),
       'utf8'
     );
   } catch (e) {
@@ -137,7 +145,7 @@ function publicInstance(row) {
   const enriched = enrichInstance(row);
   const hasScreenshot = !!enriched.lastScreenshotB64;
   const { lastScreenshotB64, ...rest } = enriched;
-  return { ...rest, hasScreenshot };
+  return { ...rest, hasScreenshot, remoteSnapshot: enriched.remoteSnapshot || null };
 }
 
 function listInstancesPublic() {
@@ -147,6 +155,7 @@ function listInstancesPublic() {
 function removeInstance(deviceId) {
   delete store.instances[deviceId];
   delete store.queues[deviceId];
+  if (store.deviceStates) delete store.deviceStates[deviceId];
   saveFleetStore();
 }
 
@@ -562,6 +571,9 @@ async function handleHeartbeat(req, res) {
       facebookTabCount: Number(body.facebookTabCount) || 0,
       facebookReason: String(body.facebookReason || '').slice(0, 120),
       visionAutoEnabled: prev.visionAutoEnabled !== false,
+      remoteSnapshot: body.remoteSnapshot && typeof body.remoteSnapshot === 'object'
+        ? body.remoteSnapshot
+        : (prev.remoteSnapshot || null),
     };
     if (prevState === 'posting' && state === 'paused') {
       notifyIrishkaPausedOnServer(instanceName, body.stopReason, body.progress).catch(() => {});
@@ -603,7 +615,7 @@ async function handleCommand(req, res, url) {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
     const target = String(body.deviceId || body.target || 'all');
-    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb'].includes(command)) {
+    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups'].includes(command)) {
       return fleetJson(res, 400, { ok: false, message: 'Invalid command' });
     }
     if (target === 'all') {
@@ -612,12 +624,16 @@ async function handleCommand(req, res, url) {
     }
     const deviceId = safeDeviceId(target);
     if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
+    const meta = {
+      source: 'webapp',
+      ...(body.meta && typeof body.meta === 'object' ? body.meta : {}),
+    };
     if (command === 'status') {
       const inst = publicInstance(store.instances[deviceId] || {});
-      const item = enqueueCommand(deviceId, command, { source: 'webapp' });
+      const item = enqueueCommand(deviceId, command, meta);
       return fleetJson(res, 200, { ok: true, queued: item, instance: inst });
     }
-    const item = enqueueCommand(deviceId, command, { source: 'webapp' });
+    const item = enqueueCommand(deviceId, command, meta);
     return fleetJson(res, 200, { ok: true, queued: item });
   } catch (e) {
     return fleetJson(res, 500, { ok: false, message: e.message });
@@ -737,6 +753,79 @@ async function handleGetScreenshotImage(req, res, url) {
   res.end(buf);
 }
 
+async function handleDeviceState(req, res) {
+  if (!fleetAuthOk(req)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  try {
+    const body = await collectJson(req);
+    const deviceId = safeDeviceId(body.deviceId);
+    if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'Invalid deviceId' });
+    const state = body.state && typeof body.state === 'object' ? body.state : null;
+    if (!state) return fleetJson(res, 400, { ok: false, message: 'state required' });
+    if (!store.deviceStates) store.deviceStates = {};
+    store.deviceStates[deviceId] = {
+      ...state,
+      updatedAt: state.updatedAt || new Date().toISOString(),
+    };
+    saveFleetStore();
+    return fleetJson(res, 200, { ok: true });
+  } catch (e) {
+    return fleetJson(res, 500, { ok: false, message: e.message });
+  }
+}
+
+async function handleGetDeviceState(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
+  if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
+  const state = store.deviceStates?.[deviceId] || null;
+  if (!state) return fleetJson(res, 404, { ok: false, message: 'No state yet — request get_state' });
+  return fleetJson(res, 200, { ok: true, deviceId, state });
+}
+
+async function handlePostAssetUpload(req, res, url) {
+  if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  try {
+    const body = await collectJson(req);
+    const b64 = String(body.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
+    if (!b64) return fleetJson(res, 400, { ok: false, message: 'imageBase64 required' });
+    if (b64.length > 2_400_000) {
+      return fleetJson(res, 413, { ok: false, message: 'Image too large (max ~1.8MB)' });
+    }
+    const id = crypto.randomBytes(10).toString('hex');
+    if (!store.postAssets) store.postAssets = {};
+    store.postAssets[id] = {
+      id,
+      imageBase64: b64,
+      mime: String(body.mime || 'image/jpeg').slice(0, 40),
+      name: String(body.name || 'fleet-image.jpg').slice(0, 80),
+      createdAt: new Date().toISOString(),
+    };
+    saveFleetStore();
+    return fleetJson(res, 200, { ok: true, assetId: id });
+  } catch (e) {
+    return fleetJson(res, 500, { ok: false, message: e.message });
+  }
+}
+
+async function handlePostAssetGet(req, res, url) {
+  if (!fleetAuthOk(req) && !webAppAuthOk(req, url)) {
+    return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
+  }
+  const id = String(url.searchParams.get('id') || '').trim();
+  if (!id || !/^[a-f0-9]{16,24}$/i.test(id)) {
+    return fleetJson(res, 400, { ok: false, message: 'Invalid asset id' });
+  }
+  const asset = store.postAssets?.[id];
+  if (!asset) return fleetJson(res, 404, { ok: false, message: 'Asset not found' });
+  return fleetJson(res, 200, {
+    ok: true,
+    assetId: id,
+    imageBase64: asset.imageBase64,
+    mime: asset.mime || 'image/jpeg',
+    name: asset.name || 'fleet-image.jpg',
+  });
+}
+
 async function handleRemove(req, res, url) {
   if (!webAppAuthOk(req, url)) return fleetJson(res, 401, { ok: false, message: 'Unauthorized' });
   try {
@@ -854,6 +943,22 @@ async function handleFleetRequest(req, res, urlPath, url) {
   }
   if (req.method === 'POST' && urlPath === '/api/fleet/validate') {
     handleValidateInit(req, res);
+    return true;
+  }
+  if (req.method === 'POST' && urlPath === '/api/fleet/device-state') {
+    await handleDeviceState(req, res);
+    return true;
+  }
+  if (req.method === 'GET' && urlPath === '/api/fleet/device-state') {
+    await handleGetDeviceState(req, res, url);
+    return true;
+  }
+  if (req.method === 'POST' && urlPath === '/api/fleet/post-asset') {
+    await handlePostAssetUpload(req, res, url);
+    return true;
+  }
+  if (req.method === 'GET' && urlPath === '/api/fleet/post-asset') {
+    await handlePostAssetGet(req, res, url);
     return true;
   }
   return false;
