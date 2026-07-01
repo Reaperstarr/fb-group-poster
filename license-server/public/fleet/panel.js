@@ -901,7 +901,7 @@
       const fleetOpId = (typeof crypto !== 'undefined' && crypto.randomUUID)
         ? crypto.randomUUID()
         : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const meta = { text, imageAssetId, fleetOpId };
+      const meta = { text, imageAssetId, fleetOpId, replaceQueue: true };
       if (imagesBase64) meta.imagesBase64 = imagesBase64;
       if (imageMime) meta.imageMime = imageMime;
       if (imageName) meta.imageName = imageName;
@@ -1015,7 +1015,7 @@
     }
   }
 
-  async function sendCommand(command, target) {
+  async function sendCommand(command, target, meta) {
     if (busy && command === 'screenshot' && !(isModalOpen() && modalDeviceId === target)) return;
     if (command === 'remote_panel' && target !== 'all') {
       await showRemotePanel(target);
@@ -1031,6 +1031,28 @@
     }
     if (command === 'start_posting' && target !== 'all') {
       await submitStartPosting(target);
+      return;
+    }
+    if (command === 'reset_idle_posts' && target !== 'all') {
+      const keep = meta?.keep || 'with_image';
+      if (!confirm('¿Dejar solo 1 post en Irishka y borrar el resto de la cola?')) return;
+      setBusy(true, 'Limpiando cola…');
+      try {
+        await apiPost('/api/fleet/command', {
+          command: 'reset_idle_posts',
+          deviceId: target,
+          target,
+          meta: { keep },
+        });
+        const lr = await waitForCommandResult(target, 'reset_idle_posts', 30000);
+        toast(lr?.message || (lr?.ok ? 'Cola limpiada' : 'No se pudo limpiar'));
+        await refresh();
+        await showRemotePanel(target);
+      } catch (e) {
+        toast('Error al limpiar cola');
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     if (command === 'remove_post' && target !== 'all') {
@@ -1172,6 +1194,7 @@
       e.stopPropagation();
       const cmd = btn.getAttribute('data-cmd');
       const target = btn.getAttribute('data-target') || 'all';
+      const cmdMeta = btn.getAttribute('data-keep') ? { keep: btn.getAttribute('data-keep') } : undefined;
       if (cmd === 'remove_post') {
         const postIndex = btn.getAttribute('data-post-index');
         if (target !== 'all' && postIndex != null) {
@@ -1179,7 +1202,7 @@
         }
         return;
       }
-      sendCommand(cmd, target).catch((err) => {
+      sendCommand(cmd, target, cmdMeta).catch((err) => {
         console.error('[fleet]', err);
         toast('Error — try again');
         setBusy(false);

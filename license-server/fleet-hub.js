@@ -159,6 +159,8 @@ function removeInstance(deviceId) {
   saveFleetStore();
 }
 
+const QUEUE_POST_TTL_MS = Math.max(30_000, Number(process.env.IRISHKA_FLEET_QUEUE_POST_TTL_MS || 90_000));
+
 function pruneStaleCommands(deviceId, maxAgeMs) {
   const ttl = maxAgeMs || 12 * 60 * 1000;
   const q = store.queues[deviceId];
@@ -167,10 +169,33 @@ function pruneStaleCommands(deviceId, maxAgeMs) {
   const kept = q.filter((item) => {
     const t = Date.parse(String(item.createdAt || ''));
     if (!Number.isFinite(t)) return false;
+    if (item.command === 'queue_post' && now - t > QUEUE_POST_TTL_MS) return false;
     return now - t <= ttl;
   });
   if (kept.length !== q.length) {
     store.queues[deviceId] = kept;
+    saveFleetStore();
+  }
+}
+
+/** At most one pending queue_post per device — drops older backlog from failed Fleet sends. */
+function pruneQueuePostsKeepLatest(deviceId) {
+  const q = store.queues[deviceId];
+  if (!Array.isArray(q) || q.length < 2) return;
+  const queuePosts = q.filter((item) => item.command === 'queue_post');
+  if (queuePosts.length <= 1) return;
+  let newest = queuePosts[0];
+  let newestTs = Date.parse(String(newest.createdAt || '')) || 0;
+  queuePosts.slice(1).forEach((item) => {
+    const ts = Date.parse(String(item.createdAt || '')) || 0;
+    if (ts >= newestTs) {
+      newest = item;
+      newestTs = ts;
+    }
+  });
+  const next = q.filter((item) => item.command !== 'queue_post' || item.id === newest.id);
+  if (next.length !== q.length) {
+    store.queues[deviceId] = next;
     saveFleetStore();
   }
 }
@@ -181,11 +206,9 @@ function enqueueCommand(deviceId, command, meta) {
   let cmdMeta = meta || {};
   if (command === 'queue_post' || command === 'push_post') {
     cmdMeta = hydratePostMetaImages(cmdMeta);
-    if (command === 'queue_post' && cmdMeta.source === 'webapp') {
-      store.queues[deviceId] = (store.queues[deviceId] || []).filter(
-        (item) => item.command !== 'queue_post'
-      );
-    }
+    store.queues[deviceId] = (store.queues[deviceId] || []).filter(
+      (item) => item.command !== 'queue_post'
+    );
     const opId = String(cmdMeta.fleetOpId || '').trim();
     if (opId) {
       const dup = (store.queues[deviceId] || []).find((item) => item.meta?.fleetOpId === opId);
@@ -221,11 +244,26 @@ function hydratePostMetaImages(meta) {
 
 function drainCommandsForDevice(deviceId, max) {
   pruneStaleCommands(deviceId);
+  pruneQueuePostsKeepLatest(deviceId);
   const limit = Math.max(1, Math.min(Number(max) || 5, 10));
   const q = store.queues[deviceId] || [];
   if (!q.length) return [];
-  const out = q.splice(0, limit);
-  saveFleetStore();
+  const batch = q.splice(0, limit);
+  let queuePostSeen = false;
+  const out = [];
+  const droppedQueuePosts = [];
+  batch.forEach((item) => {
+    if (item.command === 'queue_post') {
+      if (queuePostSeen) {
+        droppedQueuePosts.push(item);
+        return;
+      }
+      queuePostSeen = true;
+    }
+    out.push(item);
+  });
+  if (droppedQueuePosts.length) saveFleetStore();
+  else saveFleetStore();
   return out;
 }
 
@@ -647,6 +685,7 @@ async function handlePoll(req, res, url) {
   const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
   if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
   pruneStaleCommands(deviceId);
+  pruneQueuePostsKeepLatest(deviceId);
   const q = store.queues[deviceId] || [];
   const item = q.shift();
   saveFleetStore();
@@ -664,7 +703,7 @@ async function handleCommand(req, res, url) {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
     const target = String(body.deviceId || body.target || 'all');
-    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'queue_post', 'remove_post', 'start_posting', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups', 'clear_queue_posts'].includes(command)) {
+    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'queue_post', 'remove_post', 'start_posting', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups', 'clear_queue_posts', 'reset_idle_posts'].includes(command)) {
       return fleetJson(res, 400, { ok: false, message: 'Invalid command' });
     }
     if (target === 'all') {
@@ -683,6 +722,10 @@ async function handleCommand(req, res, url) {
       store.queues[deviceId] = q.filter((item) => item.command !== 'queue_post');
       saveFleetStore();
       return fleetJson(res, 200, { ok: true, removed, command });
+    }
+    if (command === 'reset_idle_posts') {
+      const item = enqueueCommand(deviceId, command, meta);
+      return fleetJson(res, 200, { ok: true, queued: item });
     }
     if (command === 'status') {
       const inst = publicInstance(store.instances[deviceId] || {});

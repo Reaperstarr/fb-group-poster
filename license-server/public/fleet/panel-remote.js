@@ -73,6 +73,9 @@
       <div class="remote-panel" data-device="${id}">
         <section class="remote-section">
           <h3>Cola de posts <span class="remote-muted">${queueCount} en cola${posting ? ' · publicando' : ''}</span></h3>
+          ${queueCount > 1 ? `<div class="remote-group-actions">
+            <button type="button" class="btn btn--warn btn-sm" data-cmd="reset_idle_posts" data-target="${id}" data-keep="with_image">🧹 Dejar 1 post (borrar duplicados)</button>
+          </div>` : ''}
           <ul class="remote-posts">${postsList}</ul>
         </section>
 
@@ -88,7 +91,7 @@
             <button type="button" class="btn btn--ok remote-start-posting" data-cmd="start_posting" data-target="${id}" ${queueCount ? '' : 'disabled'}>▶ Iniciar publicación</button>
           </div>
           <p class="remote-compose-status" id="remoteComposeStatus" hidden></p>
-          <p class="remote-hint">Añade varios posts con <strong>+ Añadir</strong>; cuando estés listo pulsa <strong>Iniciar publicación</strong>.</p>
+          <p class="remote-hint">Desde Fleet <strong>reemplaza</strong> el post en cola (si Irishka está en pausa). Usa <strong>Dejar 1 post</strong> si ves duplicados viejos.</p>
         </section>
 
         <section class="remote-section">
