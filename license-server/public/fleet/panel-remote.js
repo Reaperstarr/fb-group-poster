@@ -36,6 +36,7 @@
     const posts = state?.posts || snap.postsPreview || [];
     const groups = state?.groups || [];
     const jq = state?.joinQueue || snap.joinQueue || {};
+    const queueCount = posts.length;
     const postsList = posts.length
       ? posts.map((p, i) => {
           const active = i === (snap.postIndex || 0) && inst.state === 'posting';
@@ -43,9 +44,10 @@
             <span class="remote-post__idx">${i + 1}</span>
             <span class="remote-post__text">${escapeHtml(p.preview || p.text || '')}</span>
             ${p.hasImages ? '<span class="remote-post__img" title="Con imagen">🖼</span>' : ''}
+            <button type="button" class="remote-post__delete" data-cmd="remove_post" data-target="${id}" data-post-index="${i}" title="Eliminar post" aria-label="Eliminar post">×</button>
           </li>`;
         }).join('')
-      : '<li class="remote-empty">Sin posts en cola</li>';
+      : '<li class="remote-empty">Sin posts en cola — añade uno abajo</li>';
 
     const groupsList = groups.length
       ? groups.slice(0, 80).map((g) => {
@@ -65,21 +67,27 @@
       ? `Join activo: ${jq.cursor || 0}/${jq.total || 0} · hoy ${jq.joinedToday || 0}/${jq.dailyMax || 5}`
       : 'Join inactivo';
 
+    const posting = inst.state === 'posting';
+
     return `
       <div class="remote-panel" data-device="${id}">
         <section class="remote-section">
-          <h3>Posts activos</h3>
+          <h3>Cola de posts <span class="remote-muted">${queueCount} en cola${posting ? ' · publicando' : ''}</span></h3>
           <ul class="remote-posts">${postsList}</ul>
         </section>
 
         <section class="remote-section remote-section--compose">
-          <h3>Nuevo post (spintax)</h3>
+          <h3>Añadir post (spintax)</h3>
           <textarea class="remote-textarea" id="remotePostText" rows="4" placeholder="{Hola|Buenos días} — tu mensaje con spintax…"></textarea>
           <label class="remote-file">
             <span>Imagen (opcional)</span>
             <input type="file" id="remotePostImage" accept="image/*">
           </label>
-          <button type="button" class="btn btn--ok remote-send-post" data-cmd="push_post" data-target="${id}">▶ Publicar en esta Irishka</button>
+          <div class="remote-compose-actions">
+            <button type="button" class="btn btn--ghost remote-add-post" data-cmd="queue_post" data-target="${id}">+ Añadir a la cola</button>
+            <button type="button" class="btn btn--ok remote-start-posting" data-cmd="start_posting" data-target="${id}" ${queueCount ? '' : 'disabled'}>▶ Iniciar publicación</button>
+          </div>
+          <p class="remote-hint">Añade varios posts con <strong>+ Añadir</strong>; cuando estés listo pulsa <strong>Iniciar publicación</strong>.</p>
         </section>
 
         <section class="remote-section">

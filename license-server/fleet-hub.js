@@ -615,7 +615,7 @@ async function handleCommand(req, res, url) {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
     const target = String(body.deviceId || body.target || 'all');
-    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups'].includes(command)) {
+    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'queue_post', 'remove_post', 'start_posting', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups'].includes(command)) {
       return fleetJson(res, 400, { ok: false, message: 'Invalid command' });
     }
     if (target === 'all') {

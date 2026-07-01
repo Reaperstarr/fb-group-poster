@@ -792,7 +792,7 @@
     }
   }
 
-  async function submitPushPost(deviceId) {
+  async function submitQueuePost(deviceId) {
     const bodyEl = document.getElementById('modalBody');
     const text = String(bodyEl?.querySelector('#remotePostText')?.value || '').trim();
     if (!text) {
@@ -800,25 +800,74 @@
       return;
     }
     const file = bodyEl?.querySelector('#remotePostImage')?.files?.[0] || null;
-    setBusy(true, 'Enviando post…');
+    setBusy(true, 'Añadiendo post…');
     try {
       let imageAssetId = null;
       if (file) imageAssetId = await uploadPostImage(file);
       await apiPost('/api/fleet/command', {
-        command: 'push_post',
+        command: 'queue_post',
         deviceId,
         target: deviceId,
-        meta: { text, imageAssetId, startPosting: true },
+        meta: { text, imageAssetId },
       });
-      const lr = await waitForCommandResult(deviceId, 'push_post', 35000);
-      toast(lr?.message || (lr?.ok ? 'Post enviado' : 'Error al publicar'));
+      const lr = await waitForCommandResult(deviceId, 'queue_post', 35000);
+      toast(lr?.message || (lr?.ok ? 'Post añadido' : 'Error al añadir'));
+      const ta = bodyEl?.querySelector('#remotePostText');
+      const fi = bodyEl?.querySelector('#remotePostImage');
+      if (ta) ta.value = '';
+      if (fi) fi.value = '';
       await refresh();
       await showRemotePanel(deviceId);
     } catch (e) {
-      toast('Push post failed');
+      toast('No se pudo añadir el post');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submitStartPosting(deviceId) {
+    setBusy(true, 'Iniciando publicación…');
+    try {
+      await apiPost('/api/fleet/command', {
+        command: 'start_posting',
+        deviceId,
+        target: deviceId,
+        meta: {},
+      });
+      const lr = await waitForCommandResult(deviceId, 'start_posting', 45000);
+      toast(lr?.message || (lr?.ok ? 'Publicación iniciada' : 'No se pudo iniciar'));
+      await refresh();
+      await showRemotePanel(deviceId);
+    } catch (e) {
+      toast('Error al iniciar publicación');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRemovePost(deviceId, index) {
+    if (!confirm('¿Eliminar este post de la cola?')) return;
+    setBusy(true, 'Eliminando post…');
+    try {
+      await apiPost('/api/fleet/command', {
+        command: 'remove_post',
+        deviceId,
+        target: deviceId,
+        meta: { index: Number(index) },
+      });
+      const lr = await waitForCommandResult(deviceId, 'remove_post', 20000);
+      toast(lr?.message || (lr?.ok ? 'Post eliminado' : 'No se pudo eliminar'));
+      await refresh();
+      await showRemotePanel(deviceId);
+    } catch (e) {
+      toast('Error al eliminar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitPushPost(deviceId) {
+    await submitQueuePost(deviceId);
   }
 
   async function sendRemoteCommand(command, target, meta) {
@@ -860,7 +909,27 @@
       return;
     }
     if (command === 'push_post' && target !== 'all') {
-      await submitPushPost(target);
+      await submitQueuePost(target);
+      return;
+    }
+    if (command === 'queue_post' && target !== 'all') {
+      await submitQueuePost(target);
+      return;
+    }
+    if (command === 'start_posting' && target !== 'all') {
+      await submitStartPosting(target);
+      return;
+    }
+    if (command === 'remove_post' && target !== 'all') {
+      const btn = document.querySelector(`[data-cmd="remove_post"][data-target="${target}"]`);
+      const idx = btn?.getAttribute('data-post-index');
+      const clicked = document.activeElement?.closest?.('[data-cmd="remove_post"]');
+      const postIndex = clicked?.getAttribute('data-post-index') ?? idx;
+      if (postIndex == null) {
+        toast('Índice de post no válido');
+        return;
+      }
+      await submitRemovePost(target, postIndex);
       return;
     }
     if (command === 'refresh_remote' && target !== 'all') {
@@ -961,6 +1030,13 @@
       e.stopPropagation();
       const cmd = btn.getAttribute('data-cmd');
       const target = btn.getAttribute('data-target') || 'all';
+      if (cmd === 'remove_post') {
+        const postIndex = btn.getAttribute('data-post-index');
+        if (target !== 'all' && postIndex != null) {
+          submitRemovePost(target, postIndex).catch(() => toast('Error al eliminar'));
+        }
+        return;
+      }
       sendCommand(cmd, target).catch((err) => {
         console.error('[fleet]', err);
         toast('Error — try again');
