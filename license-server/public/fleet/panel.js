@@ -117,7 +117,7 @@
     const text = document.getElementById('busyText');
     if (el) el.hidden = !on || (fromModal && isModalOpen());
     if (text && msg) text.textContent = msg;
-    document.querySelectorAll('.card__actions [data-cmd], .toolbar [data-cmd]').forEach((b) => {
+    document.querySelectorAll('.card__actions [data-cmd], .toolbar [data-cmd], .fleet-icon-row [data-cmd], .fleet-btn[data-cmd]').forEach((b) => {
       b.disabled = on;
     });
   }
@@ -387,47 +387,51 @@
       const aiDisabled = visionGlobalEnabled === false;
       const aiTitle = aiDisabled
         ? 'Vision Guard desactivado en el servidor'
-        : (aiOn ? 'AI automático ON — clasifica pausas y auto-resume' : 'AI automático OFF — solo control manual');
-      const aiToggle = `<label class="card__ai" title="${escapeAttr(aiTitle)}" onclick="event.stopPropagation()">
-        <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
-        <span class="card__ai-label">🤖 AI</span>
-      </label>`;
+        : (aiOn ? 'AI automático ON' : 'AI automático OFF');
       const FR = window.__fleetRemote || {};
       const snap = inst.remoteSnapshot || {};
       const postLine = FR.postPreviewLine ? FR.postPreviewLine(snap) : '';
       const groupsLine = FR.groupsLine ? FR.groupsLine(snap) : '';
       const postPreview = postLine
-        ? `<p class="card__post-preview" title="${escapeAttr(postLine)}">${escapeHtml(postLine)}</p>`
+        ? `<p class="fleet-card__snippet" title="${escapeAttr(postLine)}">${escapeHtml(postLine)}</p>`
         : '';
       const groupsPreview = groupsLine
-        ? `<p class="card__groups-line">${escapeHtml(groupsLine)}</p>`
+        ? `<span class="fleet-card__chip">${escapeHtml(groupsLine)}</span>`
         : '';
+      const fbLabel = inst.facebookConnected ? 'FB' : 'FB off';
+      const aiChip = `<label class="fleet-card__chip fleet-card__chip--ai" title="${escapeAttr(aiTitle)}" onclick="event.stopPropagation()">
+        <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
+        <span>AI</span>
+      </label>`;
       return `
-        <article class="card card--roomy card--tone-${tone}" data-id="${id}" data-tone="${tone}">
-          <div class="card__body" data-open-remote="${id}" role="button" tabindex="0" title="Abrir panel remoto">
-            <div class="card__main">
-              <div class="card__head">
-                <span class="card__title" title="${name}">${name}</span>
-                <span class="card__badge card__badge--${tone}">${TONE_LABEL[tone] || tone}</span>
-              </div>
-              <div class="card__sub">
-                <span class="card__stat">${meta}</span>
-                ${groupMark}
-                <span class="card__fb-dot ${fbClass}" title="${escapeAttr(fbTitle)}${fbTabs > 1 ? ` · ${fbTabs} tabs` : ''}">📘</span>
-                ${aiToggle}
-              </div>
-              ${postPreview}
-              ${groupsPreview}
-              ${progress}
+        <article class="fleet-card fleet-card--${tone}" data-id="${id}" data-tone="${tone}">
+          <button type="button" class="fleet-card__surface" data-open-remote="${id}" title="Abrir panel remoto">
+            <div class="fleet-card__header">
+              <span class="fleet-card__dot" aria-hidden="true"></span>
+              <h2 class="fleet-card__name" title="${name}">${name}</h2>
+              <span class="fleet-card__pill fleet-card__pill--${tone}">${TONE_LABEL[tone] || tone}</span>
             </div>
-          </div>
-          <div class="card__actions card__actions--bar card__actions--bar--6">
-            <button type="button" class="btn btn--action btn--action--plus" data-cmd="remote_panel" data-target="${id}" title="Panel remoto">+</button>
-            <button type="button" class="btn btn--action btn--ghost" data-cmd="status" data-target="${id}" title="Status">📊</button>
-            <button type="button" class="btn btn--action btn--warn" data-cmd="stop" data-target="${id}" title="Pause">⏸</button>
-            <button type="button" class="btn btn--action btn--ok" data-cmd="resume" data-target="${id}" title="Resume">▶</button>
-            <button type="button" class="btn btn--action btn--ghost" data-cmd="screenshot" data-target="${id}" title="Screenshot">📸</button>
-            <button type="button" class="btn btn--action btn--danger" data-cmd="remove" data-target="${id}" title="Remove">🗑</button>
+            <div class="fleet-card__meta">
+              <span class="fleet-card__stat">${meta}</span>
+              ${groupMark ? `<span class="fleet-card__chip fleet-card__chip--pin" title="${groupTip}">Grupo</span>` : ''}
+              <span class="fleet-card__chip fleet-card__chip--fb ${fbClass}" title="${escapeAttr(fbTitle)}">${fbLabel}</span>
+              ${groupsPreview}
+              ${aiChip}
+            </div>
+            ${postPreview}
+            ${progress}
+          </button>
+          <div class="fleet-card__actions">
+            <button type="button" class="fleet-btn fleet-btn--primary" data-cmd="remote_panel" data-target="${id}">
+              <span class="fleet-btn__label">Panel</span>
+            </button>
+            <div class="fleet-icon-row">
+              <button type="button" class="fleet-icon-btn" data-cmd="stop" data-target="${id}" title="Pausar" aria-label="Pausar">⏸</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--ok" data-cmd="resume" data-target="${id}" title="Reanudar" aria-label="Reanudar">▶</button>
+              <button type="button" class="fleet-icon-btn" data-cmd="status" data-target="${id}" title="Estado" aria-label="Estado">ℹ</button>
+              <button type="button" class="fleet-icon-btn" data-cmd="screenshot" data-target="${id}" title="Captura" aria-label="Captura">◫</button>
+              <button type="button" class="fleet-icon-btn fleet-icon-btn--danger" data-cmd="remove" data-target="${id}" title="Quitar" aria-label="Quitar">✕</button>
+            </div>
           </div>
         </article>`;
     }).join('');
@@ -1016,7 +1020,7 @@
         return;
       }
       const remoteBody = e.target.closest('[data-open-remote]');
-      if (remoteBody && !e.target.closest('[data-cmd],[data-vision-toggle],button,a,input,label')) {
+      if (remoteBody && !e.target.closest('[data-cmd],[data-vision-toggle],button.fleet-icon-btn,a,input,label')) {
         const deviceId = remoteBody.getAttribute('data-open-remote');
         if (deviceId) {
           e.preventDefault();
@@ -1121,8 +1125,8 @@
     if (tg) {
       tg.ready();
       tg.expand();
-      tg.setHeaderColor('#0b1220');
-      tg.setBackgroundColor('#0b1220');
+      tg.setHeaderColor('#070d18');
+      tg.setBackgroundColor('#070d18');
       initData = tg.initData || '';
     }
 
