@@ -181,6 +181,11 @@ function enqueueCommand(deviceId, command, meta) {
   let cmdMeta = meta || {};
   if (command === 'queue_post' || command === 'push_post') {
     cmdMeta = hydratePostMetaImages(cmdMeta);
+    if (command === 'queue_post' && cmdMeta.source === 'webapp') {
+      store.queues[deviceId] = (store.queues[deviceId] || []).filter(
+        (item) => item.command !== 'queue_post'
+      );
+    }
     const opId = String(cmdMeta.fleetOpId || '').trim();
     if (opId) {
       const dup = (store.queues[deviceId] || []).find((item) => item.meta?.fleetOpId === opId);
@@ -659,7 +664,7 @@ async function handleCommand(req, res, url) {
     const body = await collectJson(req);
     const command = String(body.command || '').toLowerCase();
     const target = String(body.deviceId || body.target || 'all');
-    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'queue_post', 'remove_post', 'start_posting', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups'].includes(command)) {
+    if (!['stop', 'resume', 'screenshot', 'status', 'skip_group', 'consolidate_fb', 'get_state', 'push_post', 'queue_post', 'remove_post', 'start_posting', 'open_app', 'verify_groups', 'scan_groups', 'start_join', 'stop_join', 'toggle_groups', 'clear_queue_posts'].includes(command)) {
       return fleetJson(res, 400, { ok: false, message: 'Invalid command' });
     }
     if (target === 'all') {
@@ -672,6 +677,13 @@ async function handleCommand(req, res, url) {
       source: 'webapp',
       ...(body.meta && typeof body.meta === 'object' ? body.meta : {}),
     };
+    if (command === 'clear_queue_posts') {
+      const q = store.queues[deviceId] || [];
+      const removed = q.filter((item) => item.command === 'queue_post').length;
+      store.queues[deviceId] = q.filter((item) => item.command !== 'queue_post');
+      saveFleetStore();
+      return fleetJson(res, 200, { ok: true, removed, command });
+    }
     if (command === 'status') {
       const inst = publicInstance(store.instances[deviceId] || {});
       const item = enqueueCommand(deviceId, command, meta);

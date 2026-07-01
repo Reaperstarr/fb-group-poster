@@ -891,6 +891,13 @@
         }
       }
       setModalComposeBusy(true, 'Enviando al PC…');
+      try {
+        await apiPost('/api/fleet/command', {
+          command: 'clear_queue_posts',
+          deviceId,
+          target: deviceId,
+        });
+      } catch (_) {}
       const fleetOpId = (typeof crypto !== 'undefined' && crypto.randomUUID)
         ? crypto.randomUUID()
         : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
