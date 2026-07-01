@@ -742,6 +742,12 @@
   }
 
   async function fileToBase64(file) {
+    const maxBytes = 1_800_000;
+    if (file.size > maxBytes) {
+      const err = new Error('Image too large');
+      err.status = 413;
+      throw err;
+    }
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -755,15 +761,9 @@
     });
   }
 
-  async function uploadPostImage(file) {
+  async function uploadPostImage(file, preloadedBase64) {
     if (!file) return null;
-    const maxBytes = 1_800_000;
-    if (file.size > maxBytes) {
-      const err = new Error('Image too large');
-      err.status = 413;
-      throw err;
-    }
-    const imageBase64 = await fileToBase64(file);
+    const imageBase64 = preloadedBase64 || await fileToBase64(file);
     const resp = await apiPost('/api/fleet/post-asset', {
       imageBase64,
       mime: file.type || 'image/jpeg',
@@ -844,10 +844,17 @@
     toast(file ? 'Subiendo imagen y añadiendo post…' : 'Añadiendo post a la cola…');
     try {
       let imageAssetId = null;
+      let imagesBase64 = null;
+      let imageMime = null;
+      let imageName = null;
       if (file) {
+        imageMime = file.type || 'image/jpeg';
+        imageName = file.name || 'fleet-image.jpg';
         try {
-          imageAssetId = await uploadPostImage(file);
-          if (!imageAssetId) toast('Imagen no subida — se añade solo el texto');
+          const b64 = await fileToBase64(file);
+          if (file.size <= 900_000) imagesBase64 = [b64];
+          imageAssetId = await uploadPostImage(file, b64);
+          if (!imageAssetId && !imagesBase64) toast('Imagen no subida — se añade solo el texto');
         } catch (imgErr) {
           const imgMsg = imgErr.status === 413
             ? 'Imagen muy grande (máx ~1.8 MB) — se añade solo el texto'
@@ -856,11 +863,15 @@
         }
       }
       setModalComposeBusy(true, 'Enviando al PC…');
+      const meta = { text, imageAssetId };
+      if (imagesBase64) meta.imagesBase64 = imagesBase64;
+      if (imageMime) meta.imageMime = imageMime;
+      if (imageName) meta.imageName = imageName;
       await apiPost('/api/fleet/command', {
         command: 'queue_post',
         deviceId,
         target: deviceId,
-        meta: { text, imageAssetId },
+        meta,
       });
       const lr = await waitForCommandResult(deviceId, 'queue_post', 45000);
       if (!lr) {

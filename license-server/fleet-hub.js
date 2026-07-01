@@ -161,15 +161,35 @@ function removeInstance(deviceId) {
 
 function enqueueCommand(deviceId, command, meta) {
   if (!store.queues[deviceId]) store.queues[deviceId] = [];
+  let cmdMeta = meta || {};
+  if (command === 'queue_post' || command === 'push_post') {
+    cmdMeta = hydratePostMetaImages(cmdMeta);
+  }
   const item = {
     id: crypto.randomBytes(8).toString('hex'),
     command,
     createdAt: new Date().toISOString(),
-    meta: meta || {},
+    meta: cmdMeta,
   };
   store.queues[deviceId].push(item);
   saveFleetStore();
   return item;
+}
+
+/** Inline uploaded post image into command meta so the extension does not need a second fetch. */
+function hydratePostMetaImages(meta) {
+  if (!meta || typeof meta !== 'object') return meta;
+  const out = { ...meta };
+  const hasInline = Array.isArray(out.imagesBase64) && out.imagesBase64.some((b) => String(b || '').length > 80);
+  if (hasInline) return out;
+  const assetId = String(out.imageAssetId || '').trim();
+  if (!assetId) return out;
+  const asset = store.postAssets?.[assetId];
+  if (!asset?.imageBase64) return out;
+  out.imagesBase64 = [String(asset.imageBase64)];
+  out.imageMime = asset.mime || 'image/jpeg';
+  out.imageName = asset.name || 'fleet-image.jpg';
+  return out;
 }
 
 function drainCommandsForDevice(deviceId, max) {
