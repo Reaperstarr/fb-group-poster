@@ -159,11 +159,33 @@ function removeInstance(deviceId) {
   saveFleetStore();
 }
 
+function pruneStaleCommands(deviceId, maxAgeMs) {
+  const ttl = maxAgeMs || 12 * 60 * 1000;
+  const q = store.queues[deviceId];
+  if (!Array.isArray(q) || !q.length) return;
+  const now = Date.now();
+  const kept = q.filter((item) => {
+    const t = Date.parse(String(item.createdAt || ''));
+    if (!Number.isFinite(t)) return false;
+    return now - t <= ttl;
+  });
+  if (kept.length !== q.length) {
+    store.queues[deviceId] = kept;
+    saveFleetStore();
+  }
+}
+
 function enqueueCommand(deviceId, command, meta) {
+  pruneStaleCommands(deviceId);
   if (!store.queues[deviceId]) store.queues[deviceId] = [];
   let cmdMeta = meta || {};
   if (command === 'queue_post' || command === 'push_post') {
     cmdMeta = hydratePostMetaImages(cmdMeta);
+    const opId = String(cmdMeta.fleetOpId || '').trim();
+    if (opId) {
+      const dup = (store.queues[deviceId] || []).find((item) => item.meta?.fleetOpId === opId);
+      if (dup) return dup;
+    }
   }
   const item = {
     id: crypto.randomBytes(8).toString('hex'),
@@ -193,6 +215,7 @@ function hydratePostMetaImages(meta) {
 }
 
 function drainCommandsForDevice(deviceId, max) {
+  pruneStaleCommands(deviceId);
   const limit = Math.max(1, Math.min(Number(max) || 5, 10));
   const q = store.queues[deviceId] || [];
   if (!q.length) return [];
@@ -618,6 +641,7 @@ async function handlePoll(req, res, url) {
   if (!fleetAuthOk(req)) return fleetJson(res, 401, { ok: false });
   const deviceId = safeDeviceId(url.searchParams.get('deviceId'));
   if (!deviceId) return fleetJson(res, 400, { ok: false, message: 'deviceId required' });
+  pruneStaleCommands(deviceId);
   const q = store.queues[deviceId] || [];
   const item = q.shift();
   saveFleetStore();

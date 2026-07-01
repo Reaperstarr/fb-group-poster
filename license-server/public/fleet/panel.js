@@ -891,7 +891,10 @@
         }
       }
       setModalComposeBusy(true, 'Enviando al PC…');
-      const meta = { text, imageAssetId };
+      const fleetOpId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const meta = { text, imageAssetId, fleetOpId };
       if (imagesBase64) meta.imagesBase64 = imagesBase64;
       if (imageMime) meta.imageMime = imageMime;
       if (imageName) meta.imageName = imageName;
