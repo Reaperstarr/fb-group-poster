@@ -27,6 +27,11 @@ const MAX_DEVICES_PER_LICENSE = Math.max(1, Number(process.env.MAX_DEVICES_PER_L
 const STORE_FILE = process.env.LICENSE_STORE_FILE
   ? path.resolve(process.env.LICENSE_STORE_FILE)
   : path.join(__dirname, 'licenses.json');
+/** Static legal pages (Chrome Web Store privacy-policy URL) */
+const PUBLIC_ROOT = path.join(__dirname, 'public');
+const STATIC_HTML = {
+  '/privacy-policy.html': 'privacy-policy.html',
+};
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 const licenses = new Map(); // key -> { email, plan, active, createdAt, updatedAt }
 
@@ -428,6 +433,19 @@ function requestPath(url) {
   return p || '/';
 }
 
+function serveStaticHtml(res, relFile) {
+  const safe = path.normalize(relFile).replace(/^(\.\.(\/|\\|$))+/, '');
+  const full = path.join(PUBLIC_ROOT, safe);
+  if (!full.startsWith(PUBLIC_ROOT) || !fs.existsSync(full)) return false;
+  const body = fs.readFileSync(full);
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
+  res.end(body);
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const path = requestPath(req.url);
@@ -441,6 +459,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'GET' && path === '/health') return json(res, 200, { ok: true });
+  if (req.method === 'GET' && STATIC_HTML[path]) {
+    if (serveStaticHtml(res, STATIC_HTML[path])) return;
+    return json(res, 404, { ok: false, message: 'Not found' });
+  }
   if (await handleFleetRequest(req, res, path, url)) return;
   if (req.method === 'POST' && path === '/api/license/validate') return handleValidate(req, res);
   if (req.method === 'POST' && path === '/api/license/transfer-device') return handleTransferDevice(req, res);
