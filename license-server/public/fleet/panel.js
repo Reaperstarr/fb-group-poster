@@ -53,6 +53,7 @@
   const TONE_LABEL = {
     live: 'Live',
     paused: 'Paused',
+    limit: 'Daily limit',
     error: 'Error',
     idle: 'Idle',
     offline: 'Offline',
@@ -71,12 +72,25 @@
     return inst && inst.health && typeof inst.health === 'object' ? inst.health : null;
   }
 
-  /** Color de tarjeta: live=verde, paused=amarillo, error=rojo, idle/offline=gris */
+  /** Daily post/join cap — expected pause, not an error. */
+  function isDailyLimit(inst) {
+    if (String(inst?.stopReason || '') === 'daily_limit') return true;
+    const h = healthOf(inst);
+    if (!h) return false;
+    if (String(h.stopReason || '') === 'daily_limit') return true;
+    if (String(h.resumeHint || '') === 'daily_limit') return true;
+    const reasons = Array.isArray(h.reasons) ? h.reasons : [];
+    return reasons.some((r) => String(r || '').includes('daily_limit'));
+  }
+
+  /** Color de tarjeta: live=verde, paused=amarillo, limit=azul, error=rojo, idle/offline=gris */
   function cardTone(inst) {
     const st = inst.state || 'offline';
     const reason = String(inst.stopReason || '');
     const h = healthOf(inst);
     if (st === 'offline') return 'offline';
+    // Daily cap is expected — blue, never red (even if health says degraded/overdue).
+    if (isDailyLimit(inst)) return 'limit';
     // Health attention wins over "looks fine" posting/paused.
     if (h && (h.status === 'stalled' || h.status === 'degraded')) return 'error';
     if (st === 'posting') return 'live';
@@ -93,8 +107,11 @@
     const h = healthOf(inst);
     if (!h || !h.status) return '';
     const st = String(h.status);
+    const tip = escapeAttr(inst.healthSummary || h.label || HEALTH_LABEL[st] || st);
+    if (isDailyLimit(inst)) {
+      return `<span class="fleet-card__chip fleet-card__chip--health fleet-card__chip--health-info" title="${tip}">${ic('activity', 'fi--sm')} ${escapeHtml('Daily limit')}</span>`;
+    }
     const label = HEALTH_LABEL[st] || st;
-    const tip = escapeAttr(inst.healthSummary || h.label || label);
     const tone =
       st === 'ok' ? 'ok'
         : (st === 'stalled' || st === 'degraded') ? 'bad'

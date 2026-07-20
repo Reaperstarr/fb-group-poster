@@ -162,6 +162,11 @@ function normalizeHealth(raw, summaryRaw) {
 
 function isAttentionHealth(health) {
   if (!health || typeof health !== 'object') return false;
+  // Daily limit pause is expected — do not count as alert.
+  if (String(health.stopReason || '') === 'daily_limit') return false;
+  if (String(health.resumeHint || '') === 'daily_limit') return false;
+  const reasons = Array.isArray(health.reasons) ? health.reasons : [];
+  if (reasons.some((r) => String(r || '').includes('daily_limit'))) return false;
   return health.status === 'stalled' || health.status === 'degraded';
 }
 
@@ -791,7 +796,11 @@ async function handleDashboard(req, res, url) {
     paused: instances.filter((i) => i.state === 'paused').length,
     idle: instances.filter((i) => i.state === 'idle').length,
     offline: instances.filter((i) => i.state === 'offline').length,
-    attention: instances.filter((i) => i.state !== 'offline' && isAttentionHealth(i.health)).length,
+    attention: instances.filter((i) =>
+      i.state !== 'offline'
+      && String(i.stopReason || '') !== 'daily_limit'
+      && isAttentionHealth(i.health)
+    ).length,
   };
   return fleetJson(res, 200, {
     ok: true,
