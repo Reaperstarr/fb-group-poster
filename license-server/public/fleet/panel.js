@@ -58,18 +58,49 @@
     offline: 'Offline',
   };
 
+  const HEALTH_LABEL = {
+    ok: 'OK',
+    stalled: 'Stalled',
+    degraded: 'Degraded',
+    paused: 'Paused',
+    waiting: 'Waiting',
+    idle: 'Idle',
+  };
+
+  function healthOf(inst) {
+    return inst && inst.health && typeof inst.health === 'object' ? inst.health : null;
+  }
+
   /** Color de tarjeta: live=verde, paused=amarillo, error=rojo, idle/offline=gris */
   function cardTone(inst) {
     const st = inst.state || 'offline';
     const reason = String(inst.stopReason || '');
-    if (st === 'posting') return 'live';
+    const h = healthOf(inst);
     if (st === 'offline') return 'offline';
+    // Health attention wins over "looks fine" posting/paused.
+    if (h && (h.status === 'stalled' || h.status === 'degraded')) return 'error';
+    if (st === 'posting') return 'live';
     if (st === 'idle') return 'idle';
     if (st === 'paused') {
       if (reason === 'post_failure_pause') return 'error';
+      if (h && h.status === 'waiting') return 'paused';
       return 'paused';
     }
     return 'idle';
+  }
+
+  function healthChipHtml(inst) {
+    const h = healthOf(inst);
+    if (!h || !h.status) return '';
+    const st = String(h.status);
+    const label = HEALTH_LABEL[st] || st;
+    const tip = escapeAttr(inst.healthSummary || h.label || label);
+    const tone =
+      st === 'ok' ? 'ok'
+        : (st === 'stalled' || st === 'degraded') ? 'bad'
+          : (st === 'waiting' || st === 'paused') ? 'warn'
+            : 'mute';
+    return `<span class="fleet-card__chip fleet-card__chip--health fleet-card__chip--health-${tone}" title="${tip}">${ic('activity', 'fi--sm')} ${escapeHtml(label)}</span>`;
   }
 
   function saveFleetKey(key) {
@@ -350,6 +381,7 @@
 
   function statusHtml(inst) {
     const p = inst.progress || {};
+    const h = healthOf(inst);
     const fbLine = inst.facebookConnected
       ? (inst.facebookUserName || 'Connected')
       : (inst.facebookReason || 'Not connected');
@@ -359,6 +391,7 @@
       : String(fbTabs);
     const rows = [
       ['State', STATE_LABEL[inst.state] || inst.state],
+      ['Health', h ? (inst.healthSummary || h.label || HEALTH_LABEL[h.status] || h.status) : '—'],
       ['Facebook', inst.facebookConnected ? `✓ ${fbLine}` : `✗ ${fbLine}`],
       ['FB tabs open', fbTabsLabel],
       ['Progress', `${p.done || 0}/${p.total || 0} (${p.ok || 0} ok)`],
@@ -366,6 +399,9 @@
       ['Extension', inst.extensionVersion || '—'],
       ['Last seen', inst.lastHeartbeatAt ? new Date(inst.lastHeartbeatAt).toLocaleString() : '—'],
     ];
+    if (h && Array.isArray(h.reasons) && h.reasons.length) {
+      rows.push(['Health reasons', h.reasons.join(', ')]);
+    }
     if (inst.stopReason) rows.push(['Stop reason', inst.stopReason]);
     if (inst.lastCommandResult?.message) {
       rows.push(['Last command', inst.lastCommandResult.message]);
@@ -383,6 +419,7 @@
       { n: summary.total, l: 'Total', tone: 'total', icon: 'layers' },
       { n: summary.posting, l: 'Live', tone: 'live', icon: 'activity', c: 'var(--green)' },
       { n: summary.paused, l: 'Paused', tone: 'paused', icon: 'pause', c: 'var(--yellow)' },
+      { n: summary.attention || 0, l: 'Alert', tone: 'off', icon: 'alert-circle', c: 'var(--red)' },
       { n: summary.offline, l: 'Off', tone: 'off', icon: 'wifi-off', c: 'var(--red)' },
     ];
     document.getElementById('summaryCards').innerHTML = cards.map((c) =>
@@ -392,7 +429,8 @@
         <div class="summary-card__l">${c.l}</div>
       </div>`
     ).join('');
-    setSummaryLine(`${summary.posting} posting · ${summary.paused} paused · ${summary.offline} offline`);
+    const alertBit = (summary.attention || 0) > 0 ? ` · ${summary.attention} alert` : '';
+    setSummaryLine(`${summary.posting} posting · ${summary.paused} paused · ${summary.offline} offline${alertBit}`);
   }
 
   function renderInstances(instances) {
@@ -424,9 +462,12 @@
         ? (inst.facebookUserName || 'Facebook OK')
         : (inst.facebookReason || 'Facebook offline');
       const fbClass = inst.facebookConnected ? 'card__fb-dot--ok' : 'card__fb-dot--bad';
+      const health = healthOf(inst);
       const meta = st === 'offline'
         ? formatAgo(inst.offlineSinceMs)
-        : (total > 0 ? `${done}/${total} · ${ok}ok` : '—');
+        : (inst.healthSummary
+          ? String(inst.healthSummary).slice(0, 72)
+          : (total > 0 ? `${done}/${total} · ${ok}ok` : '—'));
       const groupTip = p.currentGroup ? escapeAttr(p.currentGroup) : '';
       const groupMark = p.currentGroup ? `<span class="fleet-card__chip fleet-card__chip--pin" title="${groupTip}">${ic('pin', 'fi--sm')} Grupo</span>` : '';
       const progress = total > 0
@@ -448,13 +489,14 @@
         ? `<span class="fleet-card__chip">${escapeHtml(groupsLine)}</span>`
         : '';
       const fbLabel = inst.facebookConnected ? 'FB' : 'FB off';
+      const healthChip = healthChipHtml(inst);
       const aiChip = `<label class="fleet-card__chip fleet-card__chip--ai" title="${escapeAttr(aiTitle)}" onclick="event.stopPropagation()">
         <input type="checkbox" class="card__ai-check" data-vision-toggle="${id}" ${aiOn ? 'checked' : ''} ${aiDisabled ? 'disabled' : ''}>
         ${ic('sparkles', 'fi--sm')}
         <span>AI</span>
       </label>`;
       return `
-        <article class="fleet-card fleet-card--${tone}" data-id="${id}" data-tone="${tone}">
+        <article class="fleet-card fleet-card--${tone}" data-id="${id}" data-tone="${tone}" data-health="${escapeAttr(health?.status || '')}">
           <button type="button" class="fleet-card__surface" data-open-remote="${id}" title="Abrir panel remoto">
             <div class="fleet-card__header">
               <span class="fleet-card__dot" aria-hidden="true"></span>
@@ -462,7 +504,8 @@
               <span class="fleet-card__pill fleet-card__pill--${tone}">${TONE_LABEL[tone] || tone}</span>
             </div>
             <div class="fleet-card__meta">
-              <span class="fleet-card__stat">${meta}</span>
+              <span class="fleet-card__stat" title="${escapeAttr(inst.healthSummary || meta)}">${escapeHtml(meta)}</span>
+              ${healthChip}
               ${groupMark ? groupMark : ''}
               <span class="fleet-card__chip fleet-card__chip--fb ${fbClass}" title="${escapeAttr(fbTitle)}">${ic('facebook', 'fi--sm')} ${fbLabel}</span>
               ${groupsPreview}

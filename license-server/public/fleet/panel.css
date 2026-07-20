@@ -535,6 +535,12 @@ html, body {
 .fleet-card--offline .fleet-card__dot { background: #6b7280; }
 .fleet-card--offline .fleet-card__pill--offline { color: #94a3b8; background: rgba(100, 116, 139, 0.12); border-color: rgba(100, 116, 139, 0.22); }
 
+.fleet-card__chip--health { font-weight: 600; }
+.fleet-card__chip--health-ok { color: #a7f3d0; border-color: rgba(62, 224, 165, 0.35); background: rgba(62, 224, 165, 0.10); }
+.fleet-card__chip--health-bad { color: #fecaca; border-color: rgba(248, 113, 113, 0.40); background: rgba(248, 113, 113, 0.12); }
+.fleet-card__chip--health-warn { color: #fde68a; border-color: rgba(245, 196, 81, 0.35); background: rgba(245, 196, 81, 0.10); }
+.fleet-card__chip--health-mute { color: #cbd5e1; border-color: rgba(148, 163, 184, 0.28); background: rgba(148, 163, 184, 0.08); }
+
 /* Legacy card aliases (modal etc.) */
 .card {
   background: var(--card);

@@ -128,6 +128,43 @@ function resolveState(body) {
   return 'idle';
 }
 
+/** Normalize optional health payload from Irishka Community (≥1.2.29). */
+function normalizeHealth(raw, summaryRaw) {
+  if (!raw || typeof raw !== 'object') {
+    const summary = String(summaryRaw || '').trim().slice(0, 240);
+    return summary ? { health: null, healthSummary: summary } : { health: null, healthSummary: null };
+  }
+  const status = String(raw.status || '').trim().toLowerCase().slice(0, 24);
+  const allowed = new Set(['ok', 'stalled', 'degraded', 'paused', 'waiting', 'idle']);
+  const safeStatus = allowed.has(status) ? status : 'idle';
+  const reasons = Array.isArray(raw.reasons)
+    ? raw.reasons.map((r) => String(r || '').slice(0, 80)).filter(Boolean).slice(0, 8)
+    : [];
+  const health = {
+    status: safeStatus,
+    label: String(raw.label || '').slice(0, 80) || null,
+    rank: Number.isFinite(Number(raw.rank)) ? Number(raw.rank) : 0,
+    reasons,
+    ageMs: Number.isFinite(Number(raw.ageMs)) ? Number(raw.ageMs) : null,
+    lastProgressAtMs: Number.isFinite(Number(raw.lastProgressAtMs)) ? Number(raw.lastProgressAtMs) : null,
+    lastError: String(raw.lastError || '').slice(0, 120) || null,
+    stopReason: String(raw.stopReason || '').slice(0, 80) || null,
+    resumeHint: String(raw.resumeHint || '').slice(0, 40) || null,
+    posterRunning: !!raw.posterRunning,
+    joinActive: !!raw.joinActive,
+    facebookConnected:
+      raw.facebookConnected === true ? true : raw.facebookConnected === false ? false : null,
+    assessedAtMs: Number.isFinite(Number(raw.assessedAtMs)) ? Number(raw.assessedAtMs) : Date.now(),
+  };
+  const healthSummary = String(summaryRaw || raw.label || '').trim().slice(0, 240) || null;
+  return { health, healthSummary };
+}
+
+function isAttentionHealth(health) {
+  if (!health || typeof health !== 'object') return false;
+  return health.status === 'stalled' || health.status === 'degraded';
+}
+
 function enrichInstance(row) {
   const last = row.lastHeartbeatAt ? Date.parse(row.lastHeartbeatAt) : 0;
   const offline = !last || Date.now() - last > OFFLINE_MS;
@@ -638,6 +675,7 @@ async function handleHeartbeat(req, res) {
     const prevState = String(prev.state || '').trim()
       || (prev.posterRunning ? 'posting' : (prev.hasRunState ? 'paused' : 'idle'));
     const state = resolveState(body);
+    const { health, healthSummary } = normalizeHealth(body.health, body.healthSummary);
     store.instances[deviceId] = {
       ...prev,
       deviceId,
@@ -661,6 +699,8 @@ async function handleHeartbeat(req, res) {
       facebookTabCount: Number(body.facebookTabCount) || 0,
       facebookReason: String(body.facebookReason || '').slice(0, 120),
       visionAutoEnabled: prev.visionAutoEnabled !== false,
+      health: health || prev.health || null,
+      healthSummary: healthSummary || prev.healthSummary || null,
       remoteSnapshot: body.remoteSnapshot && typeof body.remoteSnapshot === 'object'
         ? body.remoteSnapshot
         : (prev.remoteSnapshot || null),
@@ -751,6 +791,7 @@ async function handleDashboard(req, res, url) {
     paused: instances.filter((i) => i.state === 'paused').length,
     idle: instances.filter((i) => i.state === 'idle').length,
     offline: instances.filter((i) => i.state === 'offline').length,
+    attention: instances.filter((i) => i.state !== 'offline' && isAttentionHealth(i.health)).length,
   };
   return fleetJson(res, 200, {
     ok: true,
@@ -864,13 +905,20 @@ async function handleDeviceState(req, res) {
     const state = body.state && typeof body.state === 'object' ? body.state : null;
     if (!state) return fleetJson(res, 400, { ok: false, message: 'state required' });
     if (!store.deviceStates) store.deviceStates = {};
+    const { health, healthSummary } = normalizeHealth(state.health, state.healthSummary);
     store.deviceStates[deviceId] = {
       ...state,
+      health: health || state.health || null,
+      healthSummary: healthSummary || state.healthSummary || null,
       updatedAt: state.updatedAt || new Date().toISOString(),
     };
     const inst = store.instances[deviceId];
     if (inst && state.remoteSnapshot && typeof state.remoteSnapshot === 'object') {
       inst.remoteSnapshot = state.remoteSnapshot;
+    }
+    if (inst && (health || healthSummary)) {
+      if (health) inst.health = health;
+      if (healthSummary) inst.healthSummary = healthSummary;
     }
     if (inst && Array.isArray(state.posts)) {
       inst.remoteSnapshot = {

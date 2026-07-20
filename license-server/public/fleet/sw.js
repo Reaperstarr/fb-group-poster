@@ -1,9 +1,11 @@
 /* Irishka Fleet — PWA shell + background pause alerts */
-const CACHE = 'irishka-fleet-v7';
+const CACHE = 'irishka-fleet-v8';
 const SHELL = [
   '/fleet/panel.html',
   '/fleet/panel.css',
   '/fleet/panel.js',
+  '/fleet/panel-remote.js',
+  '/fleet/panel-icons.js',
   '/fleet/manifest.webmanifest',
   '/fleet/icon-192.png',
 ];
