@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Irishka Group Master by SBS \u2014 Community",
+  "version": "1.2.32",
+  "description": "Post to multiple Facebook groups with rich text, images, and an automatic timer.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "tabs",
+    "windows",
+    "clipboardWrite",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://www.facebook.com/*",
+    "https://web.facebook.com/*",
+    "https://facebook.com/*",
+    "https://m.facebook.com/*",
+    "https://fb-group-poster-production.up.railway.app/*",
+    "https://api.groq.com/*",
+    "https://api.telegram.org/*"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Irishka Group Master by SBS"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://web.facebook.com/*",
+        "https://facebook.com/*",
+        "https://m.facebook.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  }
+}

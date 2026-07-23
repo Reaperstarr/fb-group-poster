@@ -201,7 +201,8 @@ function removeInstance(deviceId) {
   saveFleetStore();
 }
 
-const QUEUE_POST_TTL_MS = Math.max(30_000, Number(process.env.IRISHKA_FLEET_QUEUE_POST_TTL_MS || 90_000));
+// Default 15m — devices only sync ~1/min while busy; 90s dropped queued posts too often.
+const QUEUE_POST_TTL_MS = Math.max(30_000, Number(process.env.IRISHKA_FLEET_QUEUE_POST_TTL_MS || 900_000));
 
 function pruneStaleCommands(deviceId, maxAgeMs) {
   const ttl = maxAgeMs || 12 * 60 * 1000;
